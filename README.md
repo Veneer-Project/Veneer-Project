@@ -28,13 +28,12 @@ Working (confirmed by use):
 - Vulkan rendering, audio, keyboard, mouse, camera / mouse lock
 - Chat and other text boxes: typing, selection, clipboard, shortcuts
 - F11 fullscreen
+- In-game settings are saved between sessions
+- Keys no longer stick after Alt+Tab
 
 Written but not confirmed:
 
-
 - Discord Rich Presence (opt-in, needs a Discord application ID)
-- Stuck keys after Alt+Tab (fix added, not yet confirmed by use)
-- Saving of in-game settings (see Known issues)
 - X11 (only Wayland has been run; text overlay and clipboard are Wayland-only)
 
 Not implemented:
@@ -187,27 +186,21 @@ Debugging tools:
 
 ### Known issues and next steps
 
-1. **Settings reported as not saving.** `SharedPreferences` and a lifecycle
-   shutdown were added in response; nobody has confirmed whether that fixed it,
-   or which setting was affected. `GlobalBasicSettings_13.xml` is written under
-   `files/appData/`.
-2. **Google Play download** (`update.rs`) depends on a third-party token
+1. **Google Play download** (`update.rs`) depends on a third-party token
    service (`auroraoss.com/api/auth`), on the `gpapi` crate, and on the device
    profile in `lucid/data/play_device.properties` (an x86-64 Chromebook; the
    "Play Games on PC" x86-64 profile is not offered Roblox). If any of these
    stop working, downloads break and only the manual install remains. Google
    rolls releases out per device class, so the version offered can lag the
    newest one by a release.
-3. **X11 support**: text overlay and clipboard need X11 implementations.
-4. **Gamepads** (`nativeGamepad*` in `NativeInputInterface`).
-5. **Roblox's fullscreen setting**: no Android-side call was found for it.
-6. **Video / camera**: 32 `AMediaCodec*`, `AImageReader*`, `AHardwareBuffer*`
+2. **X11 support**: text overlay and clipboard need X11 implementations.
+3. **Gamepads** (`nativeGamepad*` in `NativeInputInterface`).
+4. **Roblox's fullscreen setting**: no Android-side call was found for it.
+5. **Video / camera**: 32 `AMediaCodec*`, `AImageReader*`, `AHardwareBuffer*`
    imports are unresolved and abort if called.
-7. **App updates**: the app version comes from the APK manifest at install
-   time; a new Roblox release needs a fresh `lucid install`.
-8. **Discord**: register an application ID for the project and ship it as the
+6. **Discord**: register an application ID for the project and ship it as the
    default.
-9. Local-reference bookkeeping on engine-owned threads is minimal (locals not
+7. Local-reference bookkeeping on engine-owned threads is minimal (locals not
    explicitly deleted there are leaked).
 
 ## Legal
