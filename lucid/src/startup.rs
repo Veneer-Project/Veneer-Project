@@ -393,10 +393,21 @@ pub fn start_app_surface(window: &NativeWindow) {
     update_surface(window);
 }
 
-/// Pause and tear the app shell down (window closing).
-pub fn stop_app() {
+/// The window is closing: tell the engine the app is going away, the way
+/// Android's lifecycle would, so it flushes settings and storage.
+pub fn shutdown(in_game: bool) {
+    const LIFECYCLE: &str =
+        "com/roblox/universalapp/applifecyclenativeadapter/JNIAppLifecycleNativeAdapter";
     with_frame(|| {
-        jcall!(GL, "nativeAppBridgeV2PauseApp", "()V", fn(),);
-        jcall!(GL, "nativeAppBridgeV2DestroyApp", "()V", fn(),);
+        jcall!(LIFECYCLE, "setInactive", "()V", fn(),);
+        if in_game {
+            jcall!(GL, "nativeOnFragmentStop", "()V", fn(),);
+            jcall!(REPORTING, "gameBackgrounded", "()V", fn(),);
+            jcall!(GL, "nativeAppBridgeV2PauseGame", "()V", fn(),);
+        } else {
+            jcall!(GL, "nativeAppBridgeV2PauseApp", "()V", fn(),);
+        }
+        jcall!(LIFECYCLE, "setHidden", "()V", fn(),);
+        jcall!(REPORTING, "applicationBackgrounded", "()V", fn(),);
     });
 }

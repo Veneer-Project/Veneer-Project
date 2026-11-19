@@ -288,3 +288,26 @@ impl Input {
         }
     }
 }
+
+/// Debug aid: `LUCID_TEST_KEYS="scan:key,scan:key"` taps those key pairs,
+/// one every 4 seconds, starting 25 seconds after launch.
+pub fn spawn_test_keys() {
+    let Ok(spec) = std::env::var("LUCID_TEST_KEYS") else {
+        return;
+    };
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(25));
+        for pair in spec.split(',') {
+            let mut it = pair.split(':').map(|v| v.parse::<i32>().unwrap_or(0));
+            let (scan, key) = (it.next().unwrap_or(0), it.next().unwrap_or(0));
+            eprintln!("TESTKEY {} scan {scan} key {key}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
+            for down in [1u8, 0] {
+                with_frame(|| {
+                    jcall!(GL, "nativePassKeyEvent", "(ZIIZ)V", fn(u8, i32, i32, u8), down, scan, key, 0);
+                });
+                std::thread::sleep(std::time::Duration::from_millis(80));
+            }
+            std::thread::sleep(std::time::Duration::from_secs(8));
+        }
+    });
+}

@@ -5,12 +5,13 @@ use std::sync::Arc;
 use lucid_android::window::{Backend, NativeWindow, set_window};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{DeviceEvent, DeviceId, WindowEvent};
+use winit::event::{DeviceEvent, DeviceId, ElementState, WindowEvent};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::raw_window_handle::{
     HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
 };
-use winit::window::{CursorGrabMode, Window, WindowId};
+use winit::window::{CursorGrabMode, Fullscreen, Window, WindowId};
 
 /// Callbacks from the window into the engine glue.
 pub trait Frontend {
@@ -114,6 +115,21 @@ impl<F: Frontend> ApplicationHandler for App<F> {
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 if let Some(native) = self.native {
                     native.set_scale(scale_factor);
+                }
+            }
+            WindowEvent::KeyboardInput { ref event, .. }
+                if event.physical_key == PhysicalKey::Code(KeyCode::F11) =>
+            {
+                // Fullscreen is a window-manager matter the Android build
+                // has no notion of, so F11 is handled here.
+                if event.state == ElementState::Pressed && !event.repeat {
+                    if let Some(window) = &self.window {
+                        let next = match window.fullscreen() {
+                            Some(_) => None,
+                            None => Some(Fullscreen::Borderless(None)),
+                        };
+                        window.set_fullscreen(next);
+                    }
                 }
             }
             other => {

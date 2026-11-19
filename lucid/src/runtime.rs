@@ -71,6 +71,7 @@ impl app::Frontend for Engine {
         }
         startup::start_app(&self.device, window, &self.cookies);
         game::subscribe();
+        input::spawn_test_keys();
         crate::presence::start();
         if let Some(place) = self.join_place.take() {
             std::thread::spawn(move || game::launch(game::Launch::place(place)));
@@ -107,12 +108,20 @@ impl app::Frontend for Engine {
     }
 
     fn closing(&mut self) {
-        if self.started {
-            cookies::save();
+        if !self.started {
+            return;
         }
-        if self.started && std::env::var_os("LUCID_CLEAN_EXIT").is_some() {
-            startup::stop_app();
-        }
+        // Never let a stuck engine keep the process alive after the
+        // window is gone.
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            log::warn!("engine did not shut down in time; exiting anyway");
+            unsafe { libc::_exit(0) }
+        });
+        cookies::save();
+        startup::shutdown(game::in_game());
+        // Give the engine's background writers a moment to finish.
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
 }
 
@@ -125,6 +134,7 @@ pub fn run(probe: bool, join_place: Option<i64>) -> Result<(), Box<dyn Error>> {
     java::install(&device);
     input::install();
     audio::install();
+    crate::prefs::install();
     load_engine()?;
     startup::application_on_create();
     if probe {

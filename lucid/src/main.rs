@@ -11,6 +11,7 @@ mod install;
 #[macro_use]
 mod java;
 mod paths;
+mod prefs;
 mod presence;
 mod runtime;
 mod startup;
@@ -19,15 +20,26 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 struct Logger {
+    /// What goes to the terminal.
     level: log::LevelFilter,
+    /// Everything up to debug level also goes here, for bug reports.
+    file: Option<std::sync::Mutex<std::fs::File>>,
 }
 
 impl log::Log for Logger {
     fn enabled(&self, m: &log::Metadata) -> bool {
-        m.level() <= self.level
+        m.level() <= self.level || (self.file.is_some() && m.level() <= log::Level::Debug)
     }
     fn log(&self, r: &log::Record) {
-        if self.enabled(r.metadata()) {
+        // Our HTTP client's own chatter is not useful in either place.
+        if r.target().starts_with("rustls") || r.target().starts_with("ureq") {
+            return;
+        }
+        if let (Some(f), true) = (&self.file, r.level() <= log::Level::Debug) {
+            use std::io::Write;
+            let _ = writeln!(f.lock().unwrap(), "{} {}: {}", r.level(), r.target(), r.args());
+        }
+        if r.level() <= self.level {
             let tag = match r.level() {
                 log::Level::Error => "E",
                 log::Level::Warn => "W",
@@ -49,9 +61,12 @@ fn init_logging() {
         Ok("error") => log::LevelFilter::Error,
         _ => log::LevelFilter::Info,
     };
-    let logger: &'static Logger = Box::leak(Box::new(Logger { level }));
+    let dir = paths::data_dir().join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    let file = std::fs::File::create(dir.join("latest.log")).ok().map(std::sync::Mutex::new);
+    let logger: &'static Logger = Box::leak(Box::new(Logger { level, file }));
     log::set_logger(logger).unwrap();
-    log::set_max_level(level);
+    log::set_max_level(level.max(log::LevelFilter::Debug));
 }
 
 fn usage() -> ExitCode {

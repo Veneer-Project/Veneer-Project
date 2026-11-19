@@ -173,6 +173,7 @@ pub fn launch(l: Launch) {
             local(&p)
         );
         log::info!("start game -> {r:?}");
+        spawn_test_leave();
         jcall!(REPORTING, "gameForegrounded", "()V", fn(),);
         jcall!(GL, "nativeOnFragmentStart", "()V", fn(),);
     });
@@ -206,14 +207,30 @@ pub fn on_left() {
     crate::presence::set(crate::presence::State::Browsing);
     // Runs on its own thread: we are inside an engine callback here.
     std::thread::spawn(|| {
+        log::info!("returning to the app");
         with_frame(|| {
             jcall!(GL, "nativeOnFragmentStop", "()V", fn(),);
             jcall!(REPORTING, "gameBackgrounded", "()V", fn(),);
+            // Android destroys the game activity here, which tears the
+            // game's data model down before the app shell resumes.
+            jcall!(GL, "nativeAppBridgeV2LeaveGame", "()V", fn(),);
         });
         if let Some(window) = lucid_android::window::window() {
             startup::start_app_surface(window);
         }
     });
+}
+
+/// Debug aid: `LUCID_TEST_LEAVE=<seconds>` leaves the game that long
+/// after joining, as if the engine had reported `gameDidLeave`.
+fn spawn_test_leave() {
+    if let Some(secs) = std::env::var("LUCID_TEST_LEAVE").ok().and_then(|s| s.parse().ok()) {
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(secs));
+            log::info!("test: leaving game");
+            on_left();
+        });
+    }
 }
 
 /// Listen for launch requests from the Lua app.

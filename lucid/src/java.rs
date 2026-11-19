@@ -164,7 +164,7 @@ pub fn install(device: &Device) {
             // The payload can carry account details: keep it out of the
             // default log level.
             log::info!("engine notification {}", n.0);
-            log::debug!("engine notification payload {}", n.1);
+            log::trace!("engine notification payload {}", n.1);
             update_user(&n.0, &n.1);
             if let Some(sink) = NOTIFY.get() {
                 sink(n);
