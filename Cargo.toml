@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = ["crates/linker", "crates/bionic", "crates/jni", "crates/android", "lucid"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[workspace.dependencies]
+libc = "0.2"
+log = "0.4"
+lucid-linker = { path = "crates/linker" }
+lucid-bionic = { path = "crates/bionic" }
+lucid-jni = { path = "crates/jni" }
+lucid-android = { path = "crates/android" }
+
+[profile.dev]
+opt-level = 1
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+debug = 1
+
+[workspace.lints.rust]
+# Symbol tables are built from function addresses on purpose.
+function_casts_as_integer = "allow"

@@ -1,0 +1,16 @@
+[package]
+name = "lucid"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+libc.workspace = true
+log.workspace = true
+lucid-linker.workspace = true
+lucid-bionic.workspace = true
+lucid-jni.workspace = true
+lucid-android.workspace = true
+
+[lints]
+workspace = true

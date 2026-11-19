@@ -1,0 +1,13 @@
+[package]
+name = "lucid-bionic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+libc.workspace = true
+log.workspace = true
+lucid-linker.workspace = true
+
+[lints]
+workspace = true
