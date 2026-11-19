@@ -170,6 +170,36 @@ pub fn download_and_install(release: &Release) -> Result<()> {
     Ok(())
 }
 
+/// Run `f` while showing `label` followed by an animated `.`, `..`, `...`.
+fn with_spinner<T>(label: &str, f: impl FnOnce() -> T) -> T {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // Only animate on a terminal; in a pipe or log file, print one line.
+    if unsafe { libc::isatty(2) } == 0 {
+        eprintln!("{label}...");
+        return f();
+    }
+    let done = Arc::new(AtomicBool::new(false));
+    let (flag, text) = (done.clone(), label.to_string());
+    let spinner = std::thread::spawn(move || {
+        let mut n = 0;
+        while !flag.load(Ordering::Relaxed) {
+            n = n % 3 + 1;
+            eprint!("\r{text}{:<3}", ".".repeat(n));
+            let _ = std::io::stderr().flush();
+            std::thread::sleep(Duration::from_millis(400));
+        }
+        // Erase the line so whatever comes next starts clean.
+        eprint!("\r{}\r", " ".repeat(text.len() + 3));
+        let _ = std::io::stderr().flush();
+    });
+    let result = f();
+    done.store(true, Ordering::Relaxed);
+    let _ = spinner.join();
+    result
+}
+
 /// The cold-start check: make sure the game is installed and current.
 /// Returns an error only if there is nothing usable to run.
 pub fn ensure_current() -> Result<()> {
@@ -177,7 +207,7 @@ pub fn ensure_current() -> Result<()> {
     if installed.is_none() {
         println!("Roblox is not installed. Checking Google Play...");
     }
-    let release = match latest() {
+    let release = match with_spinner("Checking for newer versions", latest) {
         Ok(r) => r,
         Err(e) => {
             return match &installed {
