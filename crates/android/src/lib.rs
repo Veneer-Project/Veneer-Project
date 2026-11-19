@@ -1,8 +1,13 @@
 //! Host implementations of the Android NDK system libraries the guest links
 //! against (`liblog`, `libandroid`, `libEGL`, `libGLESv2`, ...).
 
+pub mod asset;
+mod egl;
 mod log_lib;
+mod looper;
 mod media;
+mod vulkan;
+pub mod window;
 
 use std::collections::HashMap;
 use std::ffi::{CString, c_void};
@@ -45,7 +50,20 @@ pub fn install() {
     media::symbols(&mut m);
     lucid_linker::register_table("libmediandk.so", m);
 
-    host_passthrough("libEGL.so", &["libEGL.so.1"]);
+    let mut a = HashMap::new();
+    asset::symbols(&mut a);
+    looper::symbols(&mut a);
+    window::symbols(&mut a);
+    lucid_linker::register_table("libandroid.so", a);
+    // Some code asks for the window API under its newer library name.
+    let mut nw = HashMap::new();
+    window::symbols(&mut nw);
+    lucid_linker::register_table("libnativewindow.so", nw);
+
+    lucid_linker::register_virtual("libEGL.so", Box::new(egl::resolve));
+    if vulkan::available() {
+        lucid_linker::register_virtual("libvulkan.so", Box::new(vulkan::resolve));
+    }
     host_passthrough("libGLESv2.so", &["libGLESv2.so.2"]);
     host_passthrough("libGLESv3.so", &["libGLESv2.so.2"]);
 }

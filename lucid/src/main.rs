@@ -1,5 +1,10 @@
 //! lucid: run the Android x86-64 build of Roblox on Linux.
 
+mod app;
+mod install;
+mod paths;
+mod runtime;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -39,57 +44,71 @@ fn init_logging() {
     log::set_max_level(level);
 }
 
-fn main() -> ExitCode {
-    init_logging();
-    let Some(lib_dir) = std::env::args().nth(1).map(PathBuf::from) else {
-        eprintln!("usage: lucid <dir containing libroblox.so>");
-        return ExitCode::from(2);
-    };
+fn usage() -> ExitCode {
+    eprintln!(
+        "lucid - run the Android build of Roblox on Linux\n\n\
+         usage:\n  \
+         lucid install <base.apk> <split_config.x86_64.apk>   unpack the game from APK files\n  \
+         lucid install --from-sober                           reuse the APKs of a Sober install\n  \
+         lucid run                                            start the game\n  \
+         lucid probe                                          load the engine without a window (debug)\n\n\
+         environment:\n  \
+         LUCID_LOG=error|warn|info|debug|trace   log verbosity"
+    );
+    ExitCode::from(2)
+}
 
-    lucid_bionic::install();
-    lucid_android::install();
-    if std::env::var_os("LUCID_LENIENT").is_some() {
-        lucid_linker::stubs::LENIENT.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    let path = lib_dir.join("libroblox.so");
-    log::info!("loading {}", path.display());
-    let image = match lucid_linker::load(&path) {
-        Ok(i) => i,
-        Err(e) => {
-            eprintln!("lucid: cannot load {}: {e}", path.display());
+fn cmd_install(args: &[String]) -> ExitCode {
+    let apks: Vec<PathBuf> = if args.iter().any(|a| a == "--from-sober") {
+        let found = install::sober_apks();
+        if found.is_empty() {
+            eprintln!(
+                "lucid: no APKs found in {}",
+                paths::sober_package_dir().display()
+            );
             return ExitCode::FAILURE;
         }
+        found
+    } else if args.is_empty() {
+        return usage();
+    } else {
+        args.iter().map(PathBuf::from).collect()
     };
-    log::info!(
-        "{} mapped at {:#x}..{:#x}",
-        image.name,
-        image.map_start,
-        image.map_start + image.map_size
-    );
-    if !image.unresolved.is_empty() {
-        log::warn!(
-            "{} unresolved imports: {}",
-            image.unresolved.len(),
-            image.unresolved.join(" ")
-        );
+    match install::install(&apks) {
+        Ok(s) => {
+            println!(
+                "installed {} libraries and {} assets into {}",
+                s.libs,
+                s.assets,
+                paths::data_dir().display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("lucid: install failed: {e}");
+            ExitCode::FAILURE
+        }
     }
+}
 
-    lucid_jni::vm().set_symbol_resolver(lucid_linker::resolve_global);
-
-    log::info!("running constructors");
-    unsafe { image.run_init() };
-    log::info!("constructors done");
-
-    let Some(on_load) = image.symbol("JNI_OnLoad") else {
-        eprintln!("lucid: no JNI_OnLoad in {}", image.name);
-        return ExitCode::FAILURE;
-    };
-    let on_load: unsafe extern "C" fn(*mut lucid_jni::JavaVM, *mut std::ffi::c_void) -> i32 =
-        unsafe { std::mem::transmute(on_load) };
-    let version = lucid_jni::with_frame(|| unsafe {
-        on_load(lucid_jni::java_vm(), std::ptr::null_mut())
-    });
-    log::info!("JNI_OnLoad returned {version:#x}");
-    ExitCode::SUCCESS
+fn main() -> ExitCode {
+    init_logging();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("install") => cmd_install(&args[1..]),
+        Some("run") | Some("probe") => {
+            if !install::is_installed() {
+                eprintln!("lucid: the game is not installed yet; see `lucid install`");
+                return ExitCode::FAILURE;
+            }
+            match runtime::run(args[0] == "probe") {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("lucid: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        _ => usage(),
+    }
 }

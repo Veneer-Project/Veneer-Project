@@ -11,6 +11,10 @@ lucid-linker.workspace = true
 lucid-bionic.workspace = true
 lucid-jni.workspace = true
 lucid-android.workspace = true
+lucid-discord.workspace = true
+winit = "0.30"
+raw-window-handle = "0.6"
+zip = { version = "9.7.3", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true
