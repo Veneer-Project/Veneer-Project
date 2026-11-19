@@ -253,6 +253,8 @@ pub struct Input {
     ctrl: bool,
     shift: bool,
     clipboard: Option<Clipboard>,
+    /// Keys the engine currently believes are down: (scancode, keycode).
+    held: Vec<(i32, i32)>,
 }
 
 fn push_text(handle: i64, text: &str, enter: bool, cursor: usize) {
@@ -459,6 +461,19 @@ impl Input {
                     jcall!(INPUT, "nativePassMouseWheel", "(FFF)V", fn(f32, f32, f32), x, y, d);
                 });
             }
+            WindowEvent::Focused(false) => {
+                // The window system keeps the key-up events of whatever was
+                // held when focus left (e.g. Alt of Alt+Tab), so release
+                // everything ourselves or the engine sees those keys as
+                // stuck down.
+                for (scancode, keycode) in std::mem::take(&mut self.held) {
+                    with_frame(|| {
+                        jcall!(GL, "nativePassKeyEvent", "(ZIIZ)V", fn(u8, i32, i32, u8), 0, scancode, keycode, 0);
+                    });
+                }
+                self.ctrl = false;
+                self.shift = false;
+            }
             WindowEvent::ModifiersChanged(mods) => {
                 self.ctrl = mods.state().control_key();
                 self.shift = mods.state().shift_key();
@@ -488,6 +503,10 @@ impl Input {
                 }
                 let down = (event.state == ElementState::Pressed) as u8;
                 let repeat = event.repeat as u8;
+                self.held.retain(|k| *k != (scancode, keycode));
+                if down != 0 {
+                    self.held.push((scancode, keycode));
+                }
                 with_frame(|| {
                     jcall!(GL, "nativePassKeyEvent", "(ZIIZ)V", fn(u8, i32, i32, u8), down, scancode, keycode, repeat);
                 });
