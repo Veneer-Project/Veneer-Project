@@ -115,6 +115,26 @@ impl Client {
         Ok(String::from_utf8_lossy(&body).into_owned())
     }
 
+    /// Whether Discord still has its end of the socket open. Discord drops
+    /// every connection when it restarts or reloads.
+    pub fn is_alive(&mut self) -> bool {
+        if self.stream.set_nonblocking(true).is_err() {
+            return false;
+        }
+        let mut buf = [0u8; 512];
+        let alive = loop {
+            match self.stream.read(&mut buf) {
+                Ok(0) => break false,
+                // Unsolicited data: discard it and keep looking.
+                Ok(_) => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break true,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break false,
+            }
+        };
+        alive && self.stream.set_nonblocking(false).is_ok()
+    }
+
     /// Set (or with `None`, clear) the rich presence.
     pub fn set_activity(&mut self, activity: Option<&Activity>) -> std::io::Result<()> {
         self.nonce += 1;
@@ -175,4 +195,26 @@ pub fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notices_when_discord_goes_away() {
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        let mut client = Client { stream: ours, nonce: 0 };
+        assert!(client.is_alive());
+        // Unsolicited data must not be mistaken for a closed connection.
+        (&theirs).write_all(b"event").unwrap();
+        assert!(client.is_alive());
+        drop(theirs);
+        assert!(!client.is_alive());
+    }
+
+    #[test]
+    fn activity_json_is_escaped() {
+        assert_eq!(json_str("a\"b\\c\n"), "\"a\\\"b\\\\c\\n\"");
+    }
 }

@@ -3,7 +3,7 @@
 //! to turn it off, or `LUCID_DISCORD_CLIENT_ID` to use another application.
 
 use std::sync::OnceLock;
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
 
 use lucid_discord::{Activity, Client, now};
 
@@ -93,17 +93,37 @@ pub fn start() {
     }
     std::thread::spawn(move || {
         let mut client: Option<Client> = None;
-        for state in rx {
-            // (Re)connect lazily: Discord may start or restart at any time.
+        // What should be showing, and whether Discord has been told.
+        let mut current: Option<Activity> = None;
+        let mut shown = false;
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(state) => {
+                    current = Some(activity(&state));
+                    shown = false;
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+            // Discord closes the socket when it restarts or reloads
+            // (Ctrl+R); notice that, reconnect and show the presence again.
+            if client.as_mut().is_some_and(|c| !c.is_alive()) {
+                log::debug!("lost the connection to Discord");
+                client = None;
+                shown = false;
+            }
             if client.is_none() {
                 client = Client::connect(&client_id)
-                    .inspect_err(|e| log::debug!("discord not reachable: {e}"))
+                    .inspect_err(|e| log::trace!("discord not reachable: {e}"))
                     .ok();
             }
-            if let Some(c) = client.as_mut() {
-                if let Err(e) = c.set_activity(Some(&activity(&state))) {
-                    log::debug!("discord presence update failed: {e}");
-                    client = None;
+            if let (Some(c), Some(a), false) = (client.as_mut(), current.as_ref(), shown) {
+                match c.set_activity(Some(a)) {
+                    Ok(()) => shown = true,
+                    Err(e) => {
+                        log::debug!("discord presence update failed: {e}");
+                        client = None;
+                    }
                 }
             }
         }
