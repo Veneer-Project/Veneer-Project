@@ -170,6 +170,12 @@ pub fn download_and_install(release: &Release) -> Result<()> {
     Ok(())
 }
 
+/// Whether dotted version `a` is strictly newer than `b`.
+fn is_newer(a: &str, b: &str) -> bool {
+    let parse = |v: &str| -> Vec<u64> { v.split('.').map(|p| p.parse().unwrap_or(0)).collect() };
+    parse(a) > parse(b)
+}
+
 /// Run `f` while showing `label` followed by an animated `.`, `..`, `...`.
 fn with_spinner<T>(label: &str, f: impl FnOnce() -> T) -> T {
     use std::sync::Arc;
@@ -226,7 +232,9 @@ pub fn ensure_current() -> Result<()> {
         }
     };
     match &installed {
-        Some(v) if *v == release.version => Ok(()),
+        // Google rolls releases out gradually, and each anonymous account
+        // can be at a different stage: never "update" to an older build.
+        Some(v) if !is_newer(&release.version, v) => Ok(()),
         Some(v) => {
             println!("Roblox {} is available (installed: {v}). Downloading the APK...", release.version);
             if let Err(e) = download_and_install(&release) {
@@ -244,5 +252,18 @@ pub fn ensure_current() -> Result<()> {
                 .into()
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_newer;
+
+    #[test]
+    fn version_comparison_is_numeric() {
+        assert!(is_newer("2.748.1527", "2.747.1486"));
+        assert!(!is_newer("2.747.1486", "2.748.1527"));
+        assert!(!is_newer("2.748.1527", "2.748.1527"));
+        assert!(is_newer("2.1000.1", "2.999.9999"));
     }
 }
