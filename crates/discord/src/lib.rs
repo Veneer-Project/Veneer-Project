@@ -15,6 +15,8 @@ const OP_FRAME: u32 = 1;
 #[derive(Clone, Debug, Default)]
 pub struct Activity {
     /// First line, e.g. the experience name.
+    // (`large_image` below is an asset key uploaded to the Discord
+    // application, or an `https` image URL.)
     pub details: Option<String>,
     /// Second line, e.g. "In game" / "Browsing".
     pub state: Option<String>,
@@ -22,6 +24,9 @@ pub struct Activity {
     pub start: Option<u64>,
     pub large_image: Option<String>,
     pub large_text: Option<String>,
+    /// Small badge over the large image: an asset key or an `https` URL.
+    pub small_image: Option<String>,
+    pub small_text: Option<String>,
     /// Up to two `(label, url)` buttons.
     pub buttons: Vec<(String, String)>,
 }
@@ -82,8 +87,9 @@ impl Client {
                         OP_HANDSHAKE,
                         &format!("{{\"v\":1,\"client_id\":{}}}", json_str(client_id)),
                     )?;
-                    let reply = c.recv()?;
-                    log::debug!("discord handshake reply: {reply}");
+                    // The reply carries the user's Discord profile: do not log it.
+                    c.recv()?;
+                    log::debug!("connected to Discord at {}", path.display());
                     return Ok(c);
                 }
                 Err(e) => last = e,
@@ -125,12 +131,19 @@ impl Client {
                 if let Some(t) = a.start {
                     parts.push(format!("\"timestamps\":{{\"start\":{t}}}"));
                 }
-                if let Some(img) = &a.large_image {
-                    let mut assets = format!("\"large_image\":{}", json_str(img));
-                    if let Some(t) = &a.large_text {
-                        assets.push_str(&format!(",\"large_text\":{}", json_str(t)));
+                let mut assets = Vec::new();
+                for (key, value) in [
+                    ("large_image", &a.large_image),
+                    ("large_text", &a.large_text),
+                    ("small_image", &a.small_image),
+                    ("small_text", &a.small_text),
+                ] {
+                    if let Some(v) = value {
+                        assets.push(format!("\"{key}\":{}", json_str(v)));
                     }
-                    parts.push(format!("\"assets\":{{{assets}}}"));
+                }
+                if !assets.is_empty() {
+                    parts.push(format!("\"assets\":{{{}}}", assets.join(",")));
                 }
                 if !a.buttons.is_empty() {
                     let b: Vec<String> = a

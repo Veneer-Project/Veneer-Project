@@ -30,10 +30,10 @@ Working (confirmed by use):
 - F11 fullscreen
 - In-game settings are saved between sessions
 - Keys no longer stick after Alt+Tab
+- Discord Rich Presence: "In the menu", or the experience's name and icon
 
 Written but not confirmed:
 
-- Discord Rich Presence (opt-in, needs a Discord application ID)
 - X11 (only Wayland has been run; text overlay and clipboard are Wayland-only)
 
 Not implemented:
@@ -88,7 +88,8 @@ Environment variables:
 |---|---|
 | `LUCID_LOG` | Terminal verbosity: `error`, `warn`, `info` (default), `debug`, `trace` |
 | `LUCID_FFLAGS` | Extra fast-flag overrides as a JSON object |
-| `LUCID_DISCORD_CLIENT_ID` | Enables Discord Rich Presence with that application ID |
+| `LUCID_DISCORD` | Set to `0` to turn Discord Rich Presence off (it is on by default) |
+| `LUCID_DISCORD_CLIENT_ID` | Use a different Discord application ID |
 | `LUCID_LENIENT` | Calls to unresolved imports return 0 instead of aborting |
 | `LUCID_NO_GUEST_SIGNALS` | Ignore signal handlers the engine tries to install |
 
@@ -198,8 +199,9 @@ Debugging tools:
 4. **Roblox's fullscreen setting**: no Android-side call was found for it.
 5. **Video / camera**: 32 `AMediaCodec*`, `AImageReader*`, `AHardwareBuffer*`
    imports are unresolved and abort if called.
-6. **Discord**: register an application ID for the project and ship it as the
-   default.
+6. **Discord logo**: the menu presence refers to an art asset named `logo`.
+   Upload `assets/logo.png` under that name in the Discord developer portal
+   (Rich Presence → Art Assets) for the application, or it shows no image.
 7. Local-reference bookkeeping on engine-owned threads is minimal (locals not
    explicitly deleted there are leaked).
 

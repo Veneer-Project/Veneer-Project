@@ -84,7 +84,7 @@ fn usage() -> ExitCode {
          lucid probe                                          load the engine without a window (debug)\n\n\
          environment:\n  \
          LUCID_LOG=error|warn|info|debug|trace   log verbosity\n  \
-         LUCID_DISCORD_CLIENT_ID=<app id>        enable Discord Rich Presence"
+         LUCID_DISCORD=0                         turn Discord Rich Presence off"
     );
     ExitCode::from(2)
 }

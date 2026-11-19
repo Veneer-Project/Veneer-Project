@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- lucid logo: a traced prism. Outer triangle, facet lines to the centre,
+       and an inner echo of the outline. -->
+  <rect width="1024" height="1024" rx="200" fill="#121218"/>
+  <g fill="none" stroke="#ff3b3b" stroke-linejoin="round" stroke-linecap="round">
+    <!-- outer outline -->
+    <path d="M512 150 L880 810 L144 810 Z" stroke-width="46"/>
+    <!-- facets: each corner to the centroid -->
+    <g stroke-width="18" stroke="#ff5a4d" opacity="0.9">
+      <path d="M512 150 L512 590"/>
+      <path d="M880 810 L512 590"/>
+      <path d="M144 810 L512 590"/>
+    </g>
+    <!-- inner outline, the outer one scaled around the centroid -->
+    <path d="M512 370 L696 700 L328 700 Z" stroke-width="20" stroke="#ff8a70"/>
+    <!-- edge ticks -->
+    <g stroke-width="14" stroke="#ff5a4d" opacity="0.75">
+      <path d="M696 480 L648 508"/>
+      <path d="M328 480 L376 508"/>
+      <path d="M512 810 L512 756"/>
+    </g>
+  </g>
+  <circle cx="512" cy="590" r="26" fill="#ff3b3b"/>
+  <circle cx="512" cy="590" r="10" fill="#121218"/>
+</svg>
