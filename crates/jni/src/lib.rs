@@ -533,7 +533,10 @@ impl Vm {
         drop(natives);
         let sym = format!("Java_{}_{}", mangle(class), mangle(name));
         let resolver = self.symbol_resolver.read().unwrap();
-        resolver.as_ref().and_then(|r| r(&sym))
+        let resolver = resolver.as_ref()?;
+        // Overloaded natives use the long form with the argument signature.
+        let params = sig.strip_prefix('(').and_then(|s| s.split(')').next()).unwrap_or("");
+        resolver(&sym).or_else(|| resolver(&format!("{sym}__{}", mangle(params))))
     }
 }
 

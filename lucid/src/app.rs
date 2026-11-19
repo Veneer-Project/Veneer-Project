@@ -17,6 +17,8 @@ pub trait Frontend {
     /// The window exists; the engine may start.
     fn started(&mut self, window: &'static NativeWindow);
     fn resized(&mut self, width: i32, height: i32);
+    /// Any other window event (input).
+    fn event(&mut self, event: &WindowEvent, window: &'static NativeWindow);
     fn closing(&mut self);
 }
 
@@ -98,7 +100,11 @@ impl<F: Frontend> ApplicationHandler for App<F> {
                     native.set_scale(scale_factor);
                 }
             }
-            _ => {}
+            other => {
+                if let Some(native) = self.native {
+                    self.frontend.event(&other, native);
+                }
+            }
         }
     }
 }

@@ -132,7 +132,6 @@ pub fn install(device: &Device) {
         log::warn!("game exited with error {}", a[0].as_i64())
     });
     vm.on(GL_JAVA, "screenOrientationChanged", "(I)V", |_, _| ());
-    vm.on(GL_JAVA, "hideKeyboard", "()V", |_, _| ());
     vm.on(GL_JAVA, "listenToMotionEvents", "(Ljava/lang/String;)V", |_, _| ());
     vm.on(GL_JAVA, "onVrSessionStateUpdate", "(I)V", |_, _| ());
 
