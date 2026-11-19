@@ -101,6 +101,8 @@ pub struct Input {
     /// Last pointer position in dp.
     x: f32,
     y: f32,
+    lock_checked: Option<std::time::Instant>,
+    lock_wanted: bool,
 }
 
 fn push_text(handle: i64, text: &str, enter: bool, cursor: usize) {
@@ -206,6 +208,31 @@ fn edit_text(event: &KeyEvent) -> bool {
 }
 
 impl Input {
+    /// Whether the engine has locked the mouse to the window centre
+    /// (polled, like the Android app does, at most every 50 ms).
+    pub fn wants_pointer_lock(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        if self.lock_checked.is_none_or(|t| now.duration_since(t).as_millis() >= 50) {
+            self.lock_checked = Some(now);
+            self.lock_wanted = with_frame(|| {
+                jcall!(INPUT, "nativeGetMainWindowIsMouseLockedCenter", "()Z", fn() -> u8,)
+            })
+            .unwrap_or(0)
+                != 0;
+        }
+        self.lock_wanted
+    }
+
+    /// Relative motion while the pointer is captured.
+    pub fn relative_motion(&mut self, dx: f64, dy: f64, window: &NativeWindow) {
+        let scale = 160.0 / window.density().max(1) as f32;
+        let (dx, dy) = (dx as f32 * scale, dy as f32 * scale);
+        let (x, y) = (self.x, self.y);
+        with_frame(|| {
+            jcall!(INPUT, "nativePassMouseMove", "(FFFF)V", fn(f32, f32, f32, f32), x, y, dx, dy);
+        });
+    }
+
     pub fn handle(&mut self, event: &WindowEvent, window: &NativeWindow) {
         let scale = 160.0 / window.density().max(1) as f32;
         match event {

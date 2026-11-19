@@ -4,6 +4,7 @@ mod app;
 mod cookies;
 mod crash;
 mod device;
+mod game;
 mod input;
 mod install;
 #[macro_use]
@@ -57,7 +58,7 @@ fn usage() -> ExitCode {
          usage:\n  \
          lucid install <base.apk> <split_config.x86_64.apk>   unpack the game from APK files\n  \
          lucid install --from-sober                           reuse the APKs of a Sober install\n  \
-         lucid run                                            start the game\n  \
+         lucid run [--place <id>]                             start Roblox (optionally joining a place)\n  \
          lucid probe                                          load the engine without a window (debug)\n\n\
          environment:\n  \
          LUCID_LOG=error|warn|info|debug|trace   log verbosity"
@@ -110,7 +111,13 @@ fn main() -> ExitCode {
                 eprintln!("lucid: the game is not installed yet; see `lucid install`");
                 return ExitCode::FAILURE;
             }
-            match runtime::run(args[0] == "probe") {
+            // `lucid run --place <id>` joins an experience directly.
+            let place = args
+                .iter()
+                .position(|a| a == "--place")
+                .and_then(|i| args.get(i + 1))
+                .and_then(|p| p.parse::<i64>().ok());
+            match runtime::run(args[0] == "probe", place) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("lucid: {e}");

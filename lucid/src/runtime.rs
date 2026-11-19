@@ -7,7 +7,7 @@ use lucid_android::window::NativeWindow;
 use lucid_linker::Image;
 
 use crate::device::Device;
-use crate::{app, cookies, input, java, paths, startup};
+use crate::{app, cookies, game, input, java, paths, startup};
 
 /// Load `libroblox.so` and run its constructors and `JNI_OnLoad`.
 fn load_engine() -> Result<&'static Image, Box<dyn Error>> {
@@ -54,6 +54,7 @@ fn load_engine() -> Result<&'static Image, Box<dyn Error>> {
 struct Engine {
     device: Device,
     cookies: String,
+    join_place: Option<i64>,
     started: bool,
     input: input::Input,
 }
@@ -69,6 +70,10 @@ impl app::Frontend for Engine {
             return;
         }
         startup::start_app(&self.device, window, &self.cookies);
+        game::subscribe();
+        if let Some(place) = self.join_place.take() {
+            std::thread::spawn(move || game::launch(game::Launch::place(place)));
+        }
         self.started = true;
         log::info!("app shell started");
     }
@@ -76,7 +81,9 @@ impl app::Frontend for Engine {
     fn resized(&mut self, width: i32, height: i32) {
         log::debug!("resized to {width}x{height}");
         if self.started {
-            if let Some(w) = lucid_android::window::window() {
+            if game::in_game() {
+                game::update_surface();
+            } else if let Some(w) = lucid_android::window::window() {
                 startup::update_surface(w);
             }
         }
@@ -86,6 +93,16 @@ impl app::Frontend for Engine {
         if self.started {
             self.input.handle(event, window);
         }
+    }
+
+    fn pointer_motion(&mut self, dx: f64, dy: f64, window: &'static NativeWindow) {
+        if self.started {
+            self.input.relative_motion(dx, dy, window);
+        }
+    }
+
+    fn wants_pointer_lock(&mut self) -> bool {
+        self.started && self.input.wants_pointer_lock()
     }
 
     fn closing(&mut self) {
@@ -98,7 +115,7 @@ impl app::Frontend for Engine {
     }
 }
 
-pub fn run(probe: bool) -> Result<(), Box<dyn Error>> {
+pub fn run(probe: bool, join_place: Option<i64>) -> Result<(), Box<dyn Error>> {
     let device = Device::detect();
     if device.app_version.is_empty() {
         return Err("unknown app version; run `lucid install` again".into());
@@ -126,6 +143,7 @@ pub fn run(probe: bool) -> Result<(), Box<dyn Error>> {
     app::run(Engine {
         device,
         cookies: cookies::load(),
+        join_place,
         started: false,
         input: input::Input::default(),
     })?;

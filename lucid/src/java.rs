@@ -60,6 +60,53 @@ macro_rules! jcall_on {
     };
 }
 
+/// The logged-in user, as last reported by the Lua app.
+#[derive(Clone, Debug)]
+pub struct User {
+    pub id: i64,
+    pub name: String,
+    pub display_name: String,
+    pub under13: bool,
+    pub membership: i32,
+}
+
+static CURRENT_USER: std::sync::Mutex<Option<User>> = std::sync::Mutex::new(None);
+
+pub fn user() -> User {
+    CURRENT_USER.lock().unwrap().clone().unwrap_or(User {
+        id: -1,
+        name: String::new(),
+        display_name: String::new(),
+        under13: true,
+        membership: 0,
+    })
+}
+
+fn update_user(kind: &str, data: &str) {
+    match kind {
+        "DID_LOG_IN" | "DID_SIGN_UP" | "DID_SWITCH_ACCOUNT" => {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
+                return;
+            };
+            let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+            let u = User {
+                id: v
+                    .get("userId")
+                    .and_then(|x| x.as_i64().or_else(|| x.as_str()?.parse().ok()))
+                    .unwrap_or(-1),
+                name: s("username"),
+                display_name: s("displayName"),
+                under13: v.get("isUnder13").and_then(|x| x.as_bool()).unwrap_or(true),
+                membership: v.get("membershipType").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
+            };
+            log::info!("logged in as {} ({})", u.name, u.id);
+            *CURRENT_USER.lock().unwrap() = Some(u);
+        }
+        "DID_LOG_OUT" => *CURRENT_USER.lock().unwrap() = None,
+        _ => {}
+    }
+}
+
 const GL_JAVA: &str = "com/roblox/engine/jni/NativeGLJavaInterface";
 const LOCALE: &str = "com/roblox/engine/jni/locale/NativeLocaleJavaInterface";
 const USER: &str = "com/roblox/engine/jni/user/NativeUserJavaInterface";
@@ -114,7 +161,11 @@ pub fn install(device: &Device) {
         "(Ljava/lang/String;Ljava/lang/String;)V",
         |_, a| {
             let n = (arg_str(a, 0), arg_str(a, 1));
-            log::info!("engine notification {} {}", n.0, n.1);
+            // The payload can carry account details: keep it out of the
+            // default log level.
+            log::info!("engine notification {}", n.0);
+            log::debug!("engine notification payload {}", n.1);
+            update_user(&n.0, &n.1);
             if let Some(sink) = NOTIFY.get() {
                 sink(n);
             }
@@ -127,9 +178,13 @@ pub fn install(device: &Device) {
         |_, a| log::info!("app bridge notification {} {}", arg_str(a, 0), arg_str(a, 1)),
     );
     vm.on(GL_JAVA, "gameLoadedCallback", "(J)V", |_, _| log::info!("game loaded"));
-    vm.on(GL_JAVA, "gameDidLeave", "()V", |_, _| log::info!("game left"));
+    vm.on(GL_JAVA, "gameDidLeave", "()V", |_, _| {
+        log::info!("game left");
+        crate::game::on_left();
+    });
     vm.on(GL_JAVA, "exitGameWithError", "(I)V", |_, a| {
-        log::warn!("game exited with error {}", a[0].as_i64())
+        log::warn!("game exited with error {}", a[0].as_i64());
+        crate::game::on_left();
     });
     vm.on(GL_JAVA, "screenOrientationChanged", "(I)V", |_, _| ());
     vm.on(GL_JAVA, "listenToMotionEvents", "(Ljava/lang/String;)V", |_, _| ());
@@ -152,14 +207,14 @@ pub fn install(device: &Device) {
 
     // Logged-out defaults; the Lua app drives login itself.
     vm.on(USER, "getAlternateName", "()Ljava/lang/String;", |_, _| new_string(""));
-    vm.on(USER, "getDisplayName", "()Ljava/lang/String;", |_, _| new_string(""));
-    vm.on(USER, "getUsername", "()Ljava/lang/String;", |_, _| new_string(""));
+    vm.on(USER, "getDisplayName", "()Ljava/lang/String;", |_, _| new_string(&user().display_name));
+    vm.on(USER, "getUsername", "()Ljava/lang/String;", |_, _| new_string(&user().name));
     vm.on(USER, "getTheme", "()Ljava/lang/String;", |_, _| new_string("dark"));
     vm.on(USER, "getPlatformName", "()Ljava/lang/String;", |_, _| new_string(""));
     vm.on(USER, "getHasRobloxSubscription", "()Z", |_, _| false);
-    vm.on(USER, "getIsUnder13", "()Z", |_, _| true);
-    vm.on(USER, "getMembershipType", "()I", |_, _| 0);
-    vm.on(USER, "getUserId", "()J", |_, _| -1i64);
+    vm.on(USER, "getIsUnder13", "()Z", |_, _| user().under13);
+    vm.on(USER, "getMembershipType", "()I", |_, _| user().membership);
+    vm.on(USER, "getUserId", "()J", |_, _| user().id);
 
     let version = device.app_version.clone();
     vm.on(REPORTER, "getAppVersion", "()Ljava/lang/String;", move |_, _| new_string(&version));

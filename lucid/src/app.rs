@@ -5,12 +5,12 @@ use std::sync::Arc;
 use lucid_android::window::{Backend, NativeWindow, set_window};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::WindowEvent;
+use winit::event::{DeviceEvent, DeviceId, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::raw_window_handle::{
     HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
 };
-use winit::window::{Window, WindowId};
+use winit::window::{CursorGrabMode, Window, WindowId};
 
 /// Callbacks from the window into the engine glue.
 pub trait Frontend {
@@ -19,6 +19,10 @@ pub trait Frontend {
     fn resized(&mut self, width: i32, height: i32);
     /// Any other window event (input).
     fn event(&mut self, event: &WindowEvent, window: &'static NativeWindow);
+    /// Relative pointer motion (used while the pointer is locked).
+    fn pointer_motion(&mut self, dx: f64, dy: f64, window: &'static NativeWindow);
+    /// Whether the engine wants the pointer captured (camera control).
+    fn wants_pointer_lock(&mut self) -> bool;
     fn closing(&mut self);
 }
 
@@ -26,6 +30,7 @@ struct App<F: Frontend> {
     frontend: F,
     window: Option<Arc<Window>>,
     native: Option<&'static NativeWindow>,
+    pointer_locked: bool,
 }
 
 fn backend_of(window: &Window) -> Option<Backend> {
@@ -78,9 +83,20 @@ impl<F: Frontend> ApplicationHandler for App<F> {
             size.height as i32,
             window.scale_factor(),
         );
+        // The engine draws its own cursor.
+        window.set_cursor_visible(false);
         self.window = Some(window);
         self.native = Some(native);
         self.frontend.started(native);
+    }
+
+    fn device_event(&mut self, _el: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
+        if let (DeviceEvent::MouseMotion { delta }, Some(native)) = (event, self.native) {
+            self.sync_pointer_lock();
+            if self.pointer_locked {
+                self.frontend.pointer_motion(delta.0, delta.1, native);
+            }
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -101,10 +117,37 @@ impl<F: Frontend> ApplicationHandler for App<F> {
                 }
             }
             other => {
+                // While locked, motion comes from relative device events.
+                if self.pointer_locked && matches!(other, WindowEvent::CursorMoved { .. }) {
+                    return;
+                }
                 if let Some(native) = self.native {
                     self.frontend.event(&other, native);
                 }
             }
+        }
+    }
+}
+
+impl<F: Frontend> App<F> {
+    fn sync_pointer_lock(&mut self) {
+        let want = self.frontend.wants_pointer_lock();
+        if want == self.pointer_locked {
+            return;
+        }
+        let Some(window) = &self.window else {
+            return;
+        };
+        let result = if want {
+            window
+                .set_cursor_grab(CursorGrabMode::Locked)
+                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+        } else {
+            window.set_cursor_grab(CursorGrabMode::None)
+        };
+        match result {
+            Ok(()) => self.pointer_locked = want,
+            Err(e) => log::debug!("pointer grab change failed: {e}"),
         }
     }
 }
@@ -116,6 +159,7 @@ pub fn run<F: Frontend>(frontend: F) -> Result<(), Box<dyn std::error::Error>> {
         frontend,
         window: None,
         native: None,
+        pointer_locked: false,
     };
     event_loop.run_app(&mut app)?;
     Ok(())

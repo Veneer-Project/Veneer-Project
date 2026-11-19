@@ -200,7 +200,7 @@ pub fn client_settings() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn platform_params(window: &NativeWindow) -> Ref {
+pub fn platform_params(window: &NativeWindow) -> Ref {
     let (w, h) = window.size();
     let dpi = window.density().max(1) as f32;
     let o = new_instance("com/roblox/engine/jni/model/PlatformParams");
@@ -351,6 +351,14 @@ pub fn start_app(device: &Device, window: &NativeWindow, cookies: &str) {
         jcall!(GL, "isColdStartDeeplinkToGame", "()Z", fn() -> u8,);
         jcall!(GL, "nativeAppBridgeStartLuaAppDM", "()V", fn(),);
 
+    });
+    start_app_surface(window);
+}
+
+/// Start (or return to) the Lua app shell on the window's surface.
+pub fn start_app_surface(window: &NativeWindow) {
+    let u = crate::java::user();
+    with_frame(|| {
         jcall!(
             GL,
             "setTaskSchedulerBackgroundMode",
@@ -366,13 +374,13 @@ pub fn start_app(device: &Device, window: &NativeWindow, cookies: &str) {
             .unwrap()
             .set("appStarterPlace", "rbxasset://places/Mobile.rbxl")
             .set("appStarterScript", "LuaAppStarterScript")
-            .set("appUserId", -1i64)
-            .set("isUnder13", true)
-            .set("membershipType", 0)
-            .set("platformParams", pp)
+            .set("appUserId", u.id)
+            .set("isUnder13", u.under13)
+            .set("membershipType", u.membership)
+            .set("platformParams", platform_params(window))
             .set("selectedTheme", "dark")
             .set("surface", surface)
-            .set("username", "")
+            .set("username", u.name.as_str())
             .set("vrContext", JValue::null());
         jcall!(
             GL,
