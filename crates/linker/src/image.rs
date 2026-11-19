@@ -431,6 +431,15 @@ fn load_inner(path: &Path, file: &File, view: usize, len: usize) -> Result<Image
         return Err(LoadError::Format("ELF TLS segments are not supported yet"));
     }
 
+    // W^X: refuse images that ask for memory that is both writable and
+    // executable. (Relocations only ever touch writable data here.)
+    if phdrs
+        .iter()
+        .any(|p| p.p_type == PT_LOAD && p.p_flags & PF_W != 0 && p.p_flags & PF_X != 0)
+    {
+        return Err(LoadError::Format("segment is both writable and executable"));
+    }
+
     let mapped = map_segments(file, &phdrs)?;
     let bias = mapped.bias;
 
