@@ -39,7 +39,7 @@ pub struct Geometry {
 
 enum Command {
     Show(Geometry),
-    Text { text: String, cursor: usize },
+    Text { text: String, cursor: usize, selection: Option<(usize, usize)> },
     Hide,
 }
 
@@ -94,6 +94,7 @@ struct Overlay {
     geometry: Option<Geometry>,
     text: String,
     cursor: usize,
+    selection: Option<(usize, usize)>,
     frame: Option<Frame>,
 }
 
@@ -146,6 +147,7 @@ impl Overlay {
             geometry: None,
             text: String::new(),
             cursor: 0,
+            selection: None,
             frame: None,
         })
     }
@@ -204,23 +206,23 @@ impl Overlay {
         // Roblox text sizes are the font's line height in pixels.
         let font = self.font.as_scaled(PxScale::from(g.font_size * s as f32));
         let baseline = (h as f32 - font.height()) / 2.0 + font.ascent();
-        // Lay the glyphs out and find the caret's x position.
+        // Lay the glyphs out; `stops[i]` is the x position before char i.
         let mut pen = 0.0f32;
-        let mut caret = 0.0f32;
         let mut glyphs = Vec::new();
+        let mut stops = vec![0.0f32];
         let mut last = None;
-        for (i, c) in shown.chars().enumerate() {
+        for c in shown.chars() {
             let id = font.glyph_id(c);
             if let Some(prev) = last {
                 pen += font.kern(prev, id);
             }
             glyphs.push((id, pen));
             pen += font.h_advance(id);
+            stops.push(pen);
             last = Some(id);
-            if i + 1 == self.cursor {
-                caret = pen;
-            }
         }
+        let stop = |i: usize| stops[i.min(stops.len() - 1)];
+        let caret = stop(self.cursor);
         let text_width = pen;
         // Alignment, then scroll so the caret stays inside the box.
         let margin = 2.0 * s as f32;
@@ -236,17 +238,30 @@ impl Overlay {
             origin = margin - caret;
         }
 
+        let (top, bottom) = ((baseline - font.ascent()) as i32, (baseline - font.descent()) as i32);
+        // Selection highlight, behind the glyphs.
+        if let Some((from, to)) = self.selection.filter(|(a, b)| a != b) {
+            let (x0, x1) = ((origin + stop(from)) as i32, (origin + stop(to)) as i32);
+            for y in top.max(0)..bottom.min(h) {
+                for x in x0.max(0)..x1.min(w) {
+                    // Premultiplied translucent blue.
+                    pixels[(y * w + x) as usize] = 0x99_1f_5c_99;
+                }
+            }
+        }
         let mut blend = |x: i32, y: i32, coverage: f32| {
             if x < 0 || y < 0 || x >= w || y >= h {
                 return;
             }
             let a = (coverage.clamp(0.0, 1.0) * 255.0) as u32;
-            let p = &mut pixels[(y * w + x) as usize];
-            let old_a = *p >> 24;
-            if a > old_a {
-                // Premultiplied ARGB.
-                *p = (a << 24) | ((r * a / 255) << 16) | ((gr * a / 255) << 8) | (b * a / 255);
+            if a == 0 {
+                return;
             }
+            let p = &mut pixels[(y * w + x) as usize];
+            // Source-over, premultiplied ARGB.
+            let inv = 255 - a;
+            let ch = |shift: u32, src: u32| ((src * a + ((*p >> shift) & 0xff) * inv) / 255) << shift;
+            *p = ch(24, 255) | ch(16, r) | ch(8, gr) | ch(0, b);
         };
         for (id, x) in glyphs {
             let glyph = id.with_scale_and_position(font.scale(), point(origin + x, baseline));
@@ -259,7 +274,6 @@ impl Overlay {
         }
         // Caret.
         let cx = (origin + caret) as i32;
-        let (top, bottom) = ((baseline - font.ascent()) as i32, (baseline - font.descent()) as i32);
         for y in top..bottom {
             for dx in 0..s.max(1) {
                 blend(cx + dx, y, 1.0);
@@ -308,9 +322,10 @@ fn sender() -> Option<&'static Sender<Command>> {
                             overlay.geometry = Some(g);
                             overlay.draw();
                         }
-                        Command::Text { text, cursor } => {
+                        Command::Text { text, cursor, selection } => {
                             overlay.text = text;
                             overlay.cursor = cursor;
+                            overlay.selection = selection;
                             overlay.draw();
                         }
                         Command::Hide => overlay.hide(),
@@ -329,12 +344,13 @@ pub fn show(g: Geometry) {
     }
 }
 
-/// Set the text and the caret position (in characters).
-pub fn set_text(text: &str, cursor: usize) {
+/// Set the text, the caret position and the selected range (in characters).
+pub fn set_text(text: &str, cursor: usize, selection: Option<(usize, usize)>) {
     if let Some(tx) = sender() {
         let _ = tx.send(Command::Text {
             text: text.to_string(),
             cursor,
+            selection,
         });
     }
 }

@@ -9,6 +9,8 @@ use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, Window
 use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 use winit::platform::scancode::PhysicalKeyExtScancode;
 
+use smithay_clipboard::Clipboard;
+
 use crate::java::jstr;
 use crate::jcall;
 use crate::overlay::{self, Geometry};
@@ -23,6 +25,74 @@ struct TextBox {
     handle: i64,
     text: Vec<char>,
     cursor: usize,
+    /// The other end of the selection, if any.
+    anchor: Option<usize>,
+}
+
+impl TextBox {
+    fn selection(&self) -> Option<(usize, usize)> {
+        self.anchor
+            .filter(|a| *a != self.cursor)
+            .map(|a| (a.min(self.cursor), a.max(self.cursor)))
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        self.selection().map(|(a, b)| self.text[a..b].iter().collect())
+    }
+
+    /// Remove the selected text. Returns whether anything was removed.
+    fn delete_selection(&mut self) -> bool {
+        let Some((a, b)) = self.selection() else {
+            self.anchor = None;
+            return false;
+        };
+        self.text.drain(a..b);
+        self.cursor = a;
+        self.anchor = None;
+        true
+    }
+
+    fn insert(&mut self, text: &str) {
+        self.delete_selection();
+        for c in text.chars().filter(|c| !c.is_control()) {
+            self.text.insert(self.cursor, c);
+            self.cursor += 1;
+        }
+    }
+
+    /// Start of the word before `from` (for Ctrl+Left / Ctrl+Backspace).
+    fn word_left(&self, from: usize) -> usize {
+        let mut i = from;
+        while i > 0 && self.text[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        while i > 0 && !self.text[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        i
+    }
+
+    fn word_right(&self, from: usize) -> usize {
+        let n = self.text.len();
+        let mut i = from;
+        while i < n && !self.text[i].is_whitespace() {
+            i += 1;
+        }
+        while i < n && self.text[i].is_whitespace() {
+            i += 1;
+        }
+        i
+    }
+
+    /// Move the caret, extending the selection when `select` (Shift) is held.
+    fn move_to(&mut self, pos: usize, select: bool) {
+        if select {
+            self.anchor.get_or_insert(self.cursor);
+        } else {
+            self.anchor = None;
+        }
+        self.cursor = pos.min(self.text.len());
+    }
 }
 
 static TEXT_BOX: Mutex<Option<TextBox>> = Mutex::new(None);
@@ -49,7 +119,7 @@ fn geometry_of(info: Option<&lucid_jni::Ref>) -> Option<Geometry> {
 /// Push the current text box contents to the overlay.
 fn show_text(tb: &TextBox) {
     let text: String = tb.text.iter().collect();
-    overlay::set_text(&text, tb.cursor);
+    overlay::set_text(&text, tb.cursor, tb.selection());
 }
 
 /// Register the text box callbacks the engine calls.
@@ -69,7 +139,7 @@ pub fn install() {
                 .unwrap_or_default();
             log::debug!("text box {handle:#x} focused (native overlay: {})", a[1].as_i64() != 0);
             let cursor = text.len();
-            let tb = TextBox { handle, text, cursor };
+            let tb = TextBox { handle, text, cursor, anchor: None };
             // With "native overlay" set, the engine leaves drawing the
             // text being edited to the platform.
             if a[1].as_i64() != 0 {
@@ -112,6 +182,7 @@ pub fn install() {
                 let text: Vec<char> = a[0].as_str().unwrap_or("").chars().collect();
                 if text != tb.text {
                     tb.cursor = tb.cursor.min(text.len());
+                    tb.anchor = None;
                     tb.text = text;
                     show_text(tb);
                 }
@@ -179,6 +250,9 @@ pub struct Input {
     y: f32,
     lock_checked: Option<std::time::Instant>,
     lock_wanted: bool,
+    ctrl: bool,
+    shift: bool,
+    clipboard: Option<Clipboard>,
 }
 
 fn push_text(handle: i64, text: &str, enter: bool, cursor: usize) {
@@ -206,7 +280,7 @@ fn push_text(handle: i64, text: &str, enter: bool, cursor: usize) {
 
 /// Edit the focused text box with a key press. Returns false if no text box
 /// has focus (the key should then go to the game as a normal key event).
-fn edit_text(event: &KeyEvent) -> bool {
+fn edit_text(event: &KeyEvent, ctrl: bool, shift: bool, clipboard: Option<&Clipboard>) -> bool {
     let mut guard = TEXT_BOX.lock().unwrap();
     let Some(tb) = guard.as_mut() else {
         return false;
@@ -217,51 +291,81 @@ fn edit_text(event: &KeyEvent) -> bool {
         return false;
     }
     let handle = tb.handle;
-    let mut changed = false;
+    let before = (tb.text.clone(), tb.cursor, tb.anchor);
     let mut enter = false;
     let mut release = false;
-    match &event.logical_key {
-        Key::Named(NamedKey::Backspace) => {
-            if tb.cursor > 0 {
-                tb.cursor -= 1;
-                tb.text.remove(tb.cursor);
-                changed = true;
+    let len = tb.text.len();
+    // Shortcuts are matched on the character, so they follow the layout.
+    let letter = match &event.logical_key {
+        Key::Character(c) if ctrl => c.to_lowercase().chars().next(),
+        _ => None,
+    };
+    match (&event.logical_key, letter) {
+        (_, Some('a')) => {
+            tb.anchor = Some(0);
+            tb.cursor = len;
+        }
+        (_, Some('c')) => {
+            if let (Some(cb), Some(text)) = (clipboard, tb.selected_text()) {
+                cb.store(text);
             }
         }
-        Key::Named(NamedKey::Delete) => {
-            if tb.cursor < tb.text.len() {
-                tb.text.remove(tb.cursor);
-                changed = true;
+        (_, Some('x')) => {
+            if let (Some(cb), Some(text)) = (clipboard, tb.selected_text()) {
+                cb.store(text);
+                tb.delete_selection();
             }
         }
-        Key::Named(NamedKey::ArrowLeft) => {
-            tb.cursor = tb.cursor.saturating_sub(1);
-            changed = true;
+        (_, Some('v')) => {
+            if let Some(text) = clipboard.and_then(|cb| cb.load().ok()) {
+                tb.insert(&text);
+            }
         }
-        Key::Named(NamedKey::ArrowRight) => {
-            tb.cursor = (tb.cursor + 1).min(tb.text.len());
-            changed = true;
+        (_, Some(_)) => {}
+        (Key::Named(NamedKey::Backspace), _) => {
+            if !tb.delete_selection() && tb.cursor > 0 {
+                let from = if ctrl { tb.word_left(tb.cursor) } else { tb.cursor - 1 };
+                tb.text.drain(from..tb.cursor);
+                tb.cursor = from;
+            }
         }
-        Key::Named(NamedKey::Home) => {
-            tb.cursor = 0;
-            changed = true;
+        (Key::Named(NamedKey::Delete), _) => {
+            if !tb.delete_selection() && tb.cursor < len {
+                let to = if ctrl { tb.word_right(tb.cursor) } else { tb.cursor + 1 };
+                tb.text.drain(tb.cursor..to);
+            }
         }
-        Key::Named(NamedKey::End) => {
-            tb.cursor = tb.text.len();
-            changed = true;
+        (Key::Named(NamedKey::ArrowLeft), _) => {
+            let pos = match tb.selection() {
+                // Without Shift, a selection collapses to its start.
+                Some((a, _)) if !shift => a,
+                _ if ctrl => tb.word_left(tb.cursor),
+                _ => tb.cursor.saturating_sub(1),
+            };
+            tb.move_to(pos, shift);
         }
-        Key::Named(NamedKey::Enter) => enter = true,
-        Key::Named(NamedKey::Escape) => release = true,
+        (Key::Named(NamedKey::ArrowRight), _) => {
+            let pos = match tb.selection() {
+                Some((_, b)) if !shift => b,
+                _ if ctrl => tb.word_right(tb.cursor),
+                _ => tb.cursor + 1,
+            };
+            tb.move_to(pos, shift);
+        }
+        (Key::Named(NamedKey::Home), _) => tb.move_to(0, shift),
+        (Key::Named(NamedKey::End), _) => tb.move_to(len, shift),
+        (Key::Named(NamedKey::Enter), _) => enter = true,
+        (Key::Named(NamedKey::Escape), _) => release = true,
         _ => {
             if let Some(text) = &event.text {
-                for c in text.chars().filter(|c| !c.is_control()) {
-                    tb.text.insert(tb.cursor, c);
-                    tb.cursor += 1;
-                    changed = true;
+                if text.chars().any(|c| !c.is_control()) {
+                    tb.insert(text);
                 }
             }
         }
     }
+    let text_changed = tb.text != before.0;
+    let changed = text_changed || tb.cursor != before.1 || tb.anchor != before.2;
     let text: String = tb.text.iter().collect();
     // UTF-16 offset, as Java's selection index would be.
     let cursor = tb.text[..tb.cursor].iter().map(|c| c.len_utf16()).sum::<usize>();
@@ -282,10 +386,15 @@ fn edit_text(event: &KeyEvent) -> bool {
         with_frame(|| {
             jcall!(GL, "nativeReleaseFocus", "(J)V", fn(i64), handle);
         });
-    } else if changed {
+    } else if text_changed || tb_cursor_moved(before.1, &before.0, cursor) {
         push_text(handle, &text, false, cursor);
     }
     true
+}
+
+/// Whether the caret's UTF-16 offset differs from where it was.
+fn tb_cursor_moved(old_cursor: usize, old_text: &[char], new_utf16: usize) -> bool {
+    old_text[..old_cursor.min(old_text.len())].iter().map(|c| c.len_utf16()).sum::<usize>() != new_utf16
 }
 
 impl Input {
@@ -350,8 +459,18 @@ impl Input {
                     jcall!(INPUT, "nativePassMouseWheel", "(FFF)V", fn(f32, f32, f32), x, y, d);
                 });
             }
+            WindowEvent::ModifiersChanged(mods) => {
+                self.ctrl = mods.state().control_key();
+                self.shift = mods.state().shift_key();
+            }
             WindowEvent::KeyboardInput { event, .. } => {
-                if edit_text(event) {
+                if self.clipboard.is_none() {
+                    // The clipboard shares the window's Wayland connection.
+                    if let lucid_android::window::Backend::Wayland { display, .. } = window.backend {
+                        self.clipboard = Some(unsafe { Clipboard::new(display as *mut _) });
+                    }
+                }
+                if edit_text(event, self.ctrl, self.shift, self.clipboard.as_ref()) {
                     return;
                 }
                 let code = match event.physical_key {
@@ -432,7 +551,7 @@ pub fn spawn_test_clicks() {
                     for n in 1..=text.chars().count() {
                         let part: String = text.chars().take(n).collect();
                         push_text(handle, &part, false, n);
-                        overlay::set_text(&part, n);
+                        overlay::set_text(&part, n, None);
                         std::thread::sleep(std::time::Duration::from_millis(120));
                     }
                 }
