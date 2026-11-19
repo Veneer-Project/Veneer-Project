@@ -14,8 +14,8 @@ is reimplemented in Rust.
 
 ## Status
 
-Tested on one machine: Debian 13, GNOME on Wayland, Intel HD 520 (Mesa/Vulkan),
-Roblox 2.745.1142.
+Early and experimental. So far it has only been run on a single setup: a
+Wayland desktop with Mesa's Intel Vulkan driver, against Roblox 2.745.1142.
 
 Working (confirmed by use):
 
@@ -164,11 +164,13 @@ Debugging tools:
   `LUCID_TEST_KEYS="scan:key,..."` taps keys,
   `LUCID_TEST_LEAVE=<seconds>` leaves a game after that long.
   Engine screenshots do not include the text overlay (it is a separate surface).
-- Reference material, not part of the repository: the decompiled Java side of
-  the APK (jadx output) was kept in `~/Downloads/lucid-work/jadx-out/sources`,
-  with a small cross-reference finder in `~/Downloads/lucid-work/tools/xref`.
-  Useful starting points there: `com/roblox/engine/jni/*.java`,
-  `com/roblox/client/RbxKeyboard.java`, `uh/f.java`, `uh/j0.java`, `yj/k0.java`.
+- Reference material is not part of the repository. To see what the Java
+  side of the app does, decompile `base.apk` yourself with
+  [jadx](https://github.com/skylot/jadx) (`jadx --no-res -d out base.apk`).
+  Useful starting points in the output: `com/roblox/engine/jni/*.java`,
+  `com/roblox/client/RbxKeyboard.java`, and the callers of the
+  `nativeAppBridgeV2*` methods (class names in obfuscated packages change
+  between releases, so find them with `grep`).
 
 ### Known issues and next steps
 
