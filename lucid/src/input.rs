@@ -136,7 +136,9 @@ fn edit_text(event: &KeyEvent) -> bool {
         return false;
     };
     if event.state != ElementState::Pressed {
-        return true;
+        // Let releases through, so a key that was held when the text box
+        // took focus (like the "/" that opens chat) does not stay down.
+        return false;
     }
     let handle = tb.handle;
     let mut changed = false;
@@ -273,11 +275,19 @@ impl Input {
                 if edit_text(event) {
                     return;
                 }
-                let PhysicalKey::Code(code) = event.physical_key else {
-                    return;
+                let code = match event.physical_key {
+                    PhysicalKey::Code(code) => code,
+                    PhysicalKey::Unidentified(_) => KeyCode::Fn,
                 };
-                let scancode = event.physical_key.to_scancode().unwrap_or(0) as i32;
-                let keycode = android_keycode(code);
+                let mut scancode = event.physical_key.to_scancode().unwrap_or(0) as i32;
+                let mut keycode = android_keycode(code);
+                // The engine reads keys by position, but "/" (which opens
+                // chat) sits on a different key on some layouts (ABNT2,
+                // most ISO ones): follow the typed character for it.
+                if matches!(&event.logical_key, Key::Character(c) if c.as_str() == "/") {
+                    scancode = 53; // KEY_SLASH
+                    keycode = 76; // KEYCODE_SLASH
+                }
                 let down = (event.state == ElementState::Pressed) as u8;
                 let repeat = event.repeat as u8;
                 with_frame(|| {

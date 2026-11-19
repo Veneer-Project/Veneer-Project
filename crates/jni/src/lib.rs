@@ -626,6 +626,15 @@ pub fn install_stdlib() {
             list_items(this).get(i).cloned().flatten()
         });
     }
+    // Native code converts Java strings with `getBytes("UTF-8")`.
+    for sig in ["()[B", "(Ljava/lang/String;)[B", "(Ljava/nio/charset/Charset;)[B"] {
+        vm.on("java/lang/String", "getBytes", sig, |this, _| {
+            new_byte_array(this.and_then(|t| t.as_str()).unwrap_or("").as_bytes())
+        });
+    }
+    vm.on("java/lang/String", "length", "()I", |this, _| {
+        this.and_then(|t| t.as_str()).unwrap_or("").encode_utf16().count() as i32
+    });
     vm.on("*", "toString", "()Ljava/lang/String;", |this, _| {
         match this.map(|t| &**t) {
             Some(Object::Str(s)) => new_string(s),
