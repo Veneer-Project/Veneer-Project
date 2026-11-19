@@ -15,10 +15,12 @@ is reimplemented in Rust.
 ## Status
 
 Tested on one machine: Debian 13, GNOME on Wayland, Intel HD 520 (Mesa/Vulkan),
-Roblox 2.745.1142.
+Roblox 2.745.1142 and 2.747.1486.
 
 Working (confirmed by use):
 
+- Automatic download and update of the game from Google Play at startup
+  (updated 2.745.1142 to 2.747.1486 this way)
 - Install from APK files, or from an existing Sober install
 - Engine boot, home page, login (the session persists across restarts)
 - Joining experiences, from the app or directly with `--place`
@@ -29,6 +31,7 @@ Working (confirmed by use):
 
 Written but not confirmed:
 
+
 - Discord Rich Presence (opt-in, needs a Discord application ID)
 - Stuck keys after Alt+Tab (fix added, not yet confirmed by use)
 - Saving of in-game settings (see Known issues)
@@ -36,7 +39,6 @@ Written but not confirmed:
 
 Not implemented:
 
-- Downloading the APK from Google Play (you must supply the APKs)
 - Gamepads, touch, in-game video, camera, voice chat
 - The "fullscreen" switch inside Roblox's own settings (use F11)
 - Mouse selection inside text boxes, multi-line text boxes (drawn as one line)
@@ -51,11 +53,23 @@ packages are needed to build.
 
 ```sh
 cargo build
-./target/debug/lucid install --from-sober       # or: install base.apk split_config.x86_64.apk
-./target/debug/lucid run                        # start Roblox
+./target/debug/lucid run                        # download/update the game if needed, then start
+./target/debug/lucid update                     # only download/update
+./target/debug/lucid install --from-sober       # manual install; or: install base.apk split_config.x86_64.apk
 ./target/debug/lucid run --place 1818           # join a place directly
 ./target/debug/lucid probe                      # boot the engine without a window
 ```
+
+On every start, `lucid run` checks Google Play for the current Roblox release
+and downloads it if the game is missing or out of date (`--no-update` or
+`LUCID_NO_UPDATE=1` skips this). Google Play needs a signed-in account, so
+lucid asks the Aurora Store project's public token service for an anonymous
+one, then downloads straight from Google. If that fails, lucid prints a
+warning and starts the version already installed; if nothing is installed it
+stops and tells you to install manually.
+
+The first build compiles OpenSSL from source (needs `perl` and `make`); use
+`cargo build --no-default-features` to link the system `libssl` instead.
 
 Where things live:
 
@@ -96,6 +110,7 @@ crates/jni       A fake JavaVM/JNIEnv with a small object model. "Java" methods
 crates/discord   Discord IPC client (no dependencies).
 lucid/           The launcher binary:
   install.rs     unpack APKs            startup.rs   the Android app's startup sequence
+  update.rs      Google Play download and update check
   runtime.rs     load engine, run       java.rs      static callback classes, jcall! macro
   app.rs         winit window/events    game.rs      join / leave experiences
   input.rs       keys, mouse, text      overlay.rs   native text overlay (Wayland sub-surface)
@@ -176,7 +191,13 @@ Debugging tools:
    shutdown were added in response; nobody has confirmed whether that fixed it,
    or which setting was affected. `GlobalBasicSettings_13.xml` is written under
    `files/appData/`.
-2. **Google Play download** of the APKs, so Sober or manual APKs are not needed.
+2. **Google Play download** (`update.rs`) depends on a third-party token
+   service (`auroraoss.com/api/auth`), on the `gpapi` crate, and on the device
+   profile in `lucid/data/play_device.properties` (an x86-64 Chromebook; the
+   "Play Games on PC" x86-64 profile is not offered Roblox). If any of these
+   stop working, downloads break and only the manual install remains. Google
+   rolls releases out per device class, so the version offered can lag the
+   newest one by a release.
 3. **X11 support**: text overlay and clipboard need X11 implementations.
 4. **Gamepads** (`nativeGamepad*` in `NativeInputInterface`).
 5. **Roblox's fullscreen setting**: no Android-side call was found for it.

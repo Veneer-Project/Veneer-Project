@@ -21,6 +21,18 @@ wayland-client = "0.31"
 ab_glyph = "0.2"
 wayland-backend = { version = "0.3", features = ["client_system"] }
 smithay-clipboard = "0.7.3"
+gpapi = "6.1.0"
+tokio = { version = "1.54.1", features = ["rt"] }
+
+# gpapi talks to Google Play through OpenSSL. By default OpenSSL is built
+# from source so no system development package is needed (without ALPN:
+# Google Play rejects HTTP/2 from this client); build with
+# `--no-default-features` to link the system libssl instead.
+reqwest = { version = "0.13", default-features = false, optional = true }
+
+[features]
+default = ["vendored-openssl"]
+vendored-openssl = ["dep:reqwest", "reqwest/native-tls-vendored-no-alpn"]
 
 [lints]
 workspace = true

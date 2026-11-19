@@ -17,6 +17,7 @@ mod prefs;
 mod presence;
 mod runtime;
 mod startup;
+mod update;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -77,7 +78,9 @@ fn usage() -> ExitCode {
          usage:\n  \
          lucid install <base.apk> <split_config.x86_64.apk>   unpack the game from APK files\n  \
          lucid install --from-sober                           reuse the APKs of a Sober install\n  \
-         lucid run [--place <id>]                             start Roblox (optionally joining a place)\n  \
+         lucid run [--place <id>] [--no-update]               start Roblox (optionally joining a place);\n  \
+         \x20                                                    downloads or updates the game first\n  \
+         lucid update                                         only download / update the game\n  \
          lucid probe                                          load the engine without a window (debug)\n\n\
          environment:\n  \
          LUCID_LOG=error|warn|info|debug|trace   log verbosity\n  \
@@ -126,9 +129,30 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("install") => cmd_install(&args[1..]),
+        Some("update") => match update::ensure_current() {
+            Ok(()) => {
+                println!(
+                    "Roblox {} is installed.",
+                    install::installed_version().unwrap_or_default()
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("lucid: {e}");
+                ExitCode::FAILURE
+            }
+        },
         Some("run") | Some("probe") => {
-            if !install::is_installed() {
-                eprintln!("lucid: the game is not installed yet; see `lucid install`");
+            // Cold start: install the game if missing, update it if stale.
+            let skip = args.iter().any(|a| a == "--no-update")
+                || std::env::var_os("LUCID_NO_UPDATE").is_some();
+            if skip {
+                if install::installed_version().is_none() {
+                    eprintln!("lucid: the game is not installed; run without --no-update");
+                    return ExitCode::FAILURE;
+                }
+            } else if let Err(e) = update::ensure_current() {
+                eprintln!("lucid: {e}");
                 return ExitCode::FAILURE;
             }
             // `lucid run --place <id>` joins an experience directly.

@@ -127,6 +127,13 @@ pub fn sober_apks() -> Vec<PathBuf> {
     out
 }
 
-pub fn is_installed() -> bool {
-    paths::lib_dir().join("libroblox.so").exists()
+/// The installed Roblox version, if the game is installed.
+pub fn installed_version() -> Option<String> {
+    if !paths::lib_dir().join("libroblox.so").exists() {
+        return None;
+    }
+    fs::read_to_string(paths::data_dir().join("app/version"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
