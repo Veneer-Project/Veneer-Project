@@ -230,7 +230,25 @@ unsafe extern "C" fn no_tty() -> c_int {
     -1
 }
 
+unsafe extern "C" fn dbg_getattr_np(t: libc::pthread_t, attr: *mut libc::pthread_attr_t) -> c_int {
+    let r = unsafe { libc::pthread_getattr_np(t, attr) };
+    log::debug!("pthread_getattr_np({t:#x}) -> {r}");
+    r
+}
+
+unsafe extern "C" fn dbg_attr_getstack(
+    attr: *const libc::pthread_attr_t,
+    base: *mut *mut c_void,
+    size: *mut size_t,
+) -> c_int {
+    let r = unsafe { libc::pthread_attr_getstack(attr, base, size) };
+    log::debug!("pthread_attr_getstack -> {r} base {:p} size {:#x}", unsafe { *base }, unsafe { *size });
+    r
+}
+
 pub fn symbols(m: &mut HashMap<&'static str, usize>) {
+    m.insert("pthread_getattr_np", dbg_getattr_np as usize);
+    m.insert("pthread_attr_getstack", dbg_attr_getstack as usize);
     m.insert("__errno", errno_location as usize);
     m.insert("__stack_chk_guard", &raw const STACK_CHK_GUARD as usize);
     m.insert("sysconf", sysconf as usize);

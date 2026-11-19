@@ -14,6 +14,35 @@ const ASSET_PREFIX: &str = "assets/";
 pub struct Summary {
     pub libs: usize,
     pub assets: usize,
+    pub version: Option<String>,
+}
+
+/// Find the app's `versionName` (e.g. `2.745.1142`) in a binary
+/// AndroidManifest. The string pool is UTF-16 or UTF-8, so dropping NUL
+/// bytes makes it searchable either way without a full AXML parser.
+fn version_from_manifest(data: &[u8]) -> Option<String> {
+    let text: Vec<u8> = data.iter().copied().filter(|b| *b != 0).collect();
+    let mut i = 0;
+    while i < text.len() {
+        if text[i].is_ascii_digit() {
+            let start = i;
+            while i < text.len() && (text[i].is_ascii_digit() || text[i] == b'.') {
+                i += 1;
+            }
+            let cand = std::str::from_utf8(&text[start..i]).ok()?;
+            let parts: Vec<&str> = cand.split('.').collect();
+            if parts.len() == 3
+                && parts.iter().all(|p| !p.is_empty())
+                && parts[1].len() == 3
+                && parts[0].len() <= 2
+            {
+                return Some(cand.to_string());
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
 }
 
 fn extract(apk: &Path, summary: &mut Summary) -> io::Result<()> {
@@ -28,6 +57,14 @@ fn extract(apk: &Path, summary: &mut Summary) -> io::Result<()> {
             continue;
         };
         let name = name.to_string_lossy().into_owned();
+        if name == "AndroidManifest.xml" {
+            let mut data = Vec::new();
+            io::Read::read_to_end(&mut entry, &mut data)?;
+            if let Some(v) = version_from_manifest(&data) {
+                summary.version = Some(v);
+            }
+            continue;
+        }
         let dest: PathBuf = if let Some(lib) = name.strip_prefix(ABI_PREFIX) {
             if lib.contains('/') {
                 continue;
@@ -68,6 +105,10 @@ pub fn install(apks: &[PathBuf]) -> io::Result<Summary> {
         return Err(io::Error::other(
             "no lib/x86_64/libroblox.so in the given APKs (is this the x86_64 split?)",
         ));
+    }
+    match &summary.version {
+        Some(v) => fs::write(app.join("version"), v)?,
+        None => log::warn!("could not determine the app version from the APK manifest"),
     }
     Ok(summary)
 }

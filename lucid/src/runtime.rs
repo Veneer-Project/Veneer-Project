@@ -6,7 +6,8 @@ use std::ffi::c_void;
 use lucid_android::window::NativeWindow;
 use lucid_linker::Image;
 
-use crate::{app, paths};
+use crate::device::Device;
+use crate::{app, java, paths, startup};
 
 /// Load `libroblox.so` and run its constructors and `JNI_OnLoad`.
 fn load_engine() -> Result<&'static Image, Box<dyn Error>> {
@@ -50,24 +51,60 @@ fn load_engine() -> Result<&'static Image, Box<dyn Error>> {
     Ok(image)
 }
 
-struct Engine;
+struct Engine {
+    device: Device,
+    started: bool,
+}
 
 impl app::Frontend for Engine {
     fn started(&mut self, window: &'static NativeWindow) {
-        log::info!("window ready: {:?}", window.size());
+        if let Err(e) = startup::engine_setup(&self.device, "") {
+            log::error!("engine setup failed: {e}");
+            return;
+        }
+        if let Err(e) = startup::client_settings() {
+            log::error!("client settings failed: {e}");
+            return;
+        }
+        startup::start_app(&self.device, window, "");
+        self.started = true;
+        log::info!("app shell started");
     }
+
     fn resized(&mut self, width: i32, height: i32) {
         log::debug!("resized to {width}x{height}");
+        if self.started {
+            if let Some(w) = lucid_android::window::window() {
+                startup::update_surface(w);
+            }
+        }
     }
+
     fn closing(&mut self) {
-        log::info!("window closed");
+        if self.started && std::env::var_os("LUCID_CLEAN_EXIT").is_some() {
+            startup::stop_app();
+        }
     }
 }
 
 pub fn run(probe: bool) -> Result<(), Box<dyn Error>> {
+    let device = Device::detect();
+    if device.app_version.is_empty() {
+        return Err("unknown app version; run `lucid install` again".into());
+    }
+    log::info!("Roblox {}", device.app_version);
+    java::install(&device);
     load_engine()?;
+    startup::application_on_create();
     if probe {
+        startup::engine_setup(&device, "")?;
+        startup::client_settings()?;
         return Ok(());
     }
-    app::run(Engine)
+    app::run(Engine {
+        device,
+        started: false,
+    })?;
+    // Engine threads are still running; leave without unwinding them.
+    unsafe { libc::_exit(0) }
 }

@@ -213,7 +213,7 @@ impl PrimArray {
 
 pub struct Instance {
     pub class: &'static Class,
-    pub fields: Mutex<HashMap<usize, JValue>>,
+    pub fields: Mutex<HashMap<String, JValue>>,
     /// Host-side state attached to this object by its Rust implementation.
     pub data: Mutex<Option<Box<dyn Any + Send + Sync>>>,
 }
@@ -231,6 +231,19 @@ pub enum Object {
         ptr: usize,
         cap: usize,
     },
+}
+
+impl Instance {
+    /// Set a field by name (the guest reads it with `Get<Type>Field`, or
+    /// through a same-named no-argument getter method).
+    pub fn set(&self, name: &str, v: impl Into<JValue>) -> &Self {
+        self.fields.lock().unwrap().insert(name.to_string(), v.into());
+        self
+    }
+
+    pub fn get(&self, name: &str) -> Option<JValue> {
+        self.fields.lock().unwrap().get(name).cloned()
+    }
 }
 
 impl Object {
@@ -299,7 +312,7 @@ pub struct Class {
     pub name: String,
     methods: Mutex<HashMap<(String, String, bool), &'static Method>>,
     fields: Mutex<HashMap<(String, String, bool), &'static Field>>,
-    pub statics: Mutex<HashMap<usize, JValue>>,
+    pub statics: Mutex<HashMap<String, JValue>>,
     /// Native methods registered by the guest: `name + sig` -> address.
     pub natives: Mutex<HashMap<String, usize>>,
     pub supers: Mutex<Vec<String>>,
@@ -474,6 +487,15 @@ impl Vm {
                 h(this, args)
             }
             None => {
+                // Value classes: a no-argument method named like a field
+                // is treated as its getter.
+                if m.params.is_empty() {
+                    if let Some(Object::Instance(i)) = this.map(|t| &**t) {
+                        if let Some(v) = i.get(&m.name) {
+                            return v;
+                        }
+                    }
+                }
                 if !m.warned.swap(true, Ordering::Relaxed) {
                     log::warn!(
                         "UNIMPLEMENTED java method {}.{}{}{}",
@@ -571,6 +593,68 @@ pub fn new_string_array(items: &[&str]) -> Ref {
         "java/lang/String",
         items.iter().map(|s| Some(new_string(s))).collect(),
     )
+}
+
+/// A `java.util.List` holding the given objects.
+pub fn new_list(items: Vec<Option<Ref>>) -> Ref {
+    new_instance_with("java/util/ArrayList", items)
+}
+
+fn list_items(this: Option<&Ref>) -> Vec<Option<Ref>> {
+    this.and_then(|t| t.as_instance())
+        .and_then(|i| {
+            i.data
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|d| d.downcast_ref::<Vec<Option<Ref>>>().cloned())
+        })
+        .unwrap_or_default()
+}
+
+/// Register the handful of `java.*` methods native code commonly uses.
+pub fn install_stdlib() {
+    let vm = vm();
+    for class in ["java/util/List", "java/util/ArrayList", "java/util/Collection"] {
+        vm.on(class, "size", "()I", |this, _| list_items(this).len() as i32);
+        vm.on(class, "isEmpty", "()Z", |this, _| list_items(this).is_empty());
+        vm.on(class, "get", "(I)Ljava/lang/Object;", |this, args| {
+            let i = args.first().map(|a| a.as_i64()).unwrap_or(0) as usize;
+            list_items(this).get(i).cloned().flatten()
+        });
+    }
+    vm.on("*", "toString", "()Ljava/lang/String;", |this, _| {
+        match this.map(|t| &**t) {
+            Some(Object::Str(s)) => new_string(s),
+            Some(o) => new_string(&o.class_name()),
+            None => new_string("null"),
+        }
+    });
+    vm.on("*", "hashCode", "()I", |this, _| {
+        this.map(|t| Arc::as_ptr(t) as usize as i32).unwrap_or(0)
+    });
+    vm.on("java/lang/Class", "getClassLoader", "()Ljava/lang/ClassLoader;", |_, _| {
+        new_instance("java/lang/ClassLoader")
+    });
+    vm.on("java/lang/Class", "getName", "()Ljava/lang/String;", |this, _| {
+        match this.map(|t| &**t) {
+            Some(Object::Class(c)) => new_string(&c.name.replace('/', ".")),
+            _ => new_string("java.lang.Object"),
+        }
+    });
+    vm.on(
+        "java/lang/ClassLoader",
+        "loadClass",
+        "(Ljava/lang/String;)Ljava/lang/Class;",
+        |_, args| {
+            let name = args.first().and_then(|a| a.as_str()).unwrap_or("").replace('.', "/");
+            vm_class_object(&name)
+        },
+    );
+}
+
+fn vm_class_object(name: &str) -> Ref {
+    vm().class(name).object()
 }
 
 // --- reference management -----------------------------------------------------

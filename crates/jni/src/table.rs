@@ -368,11 +368,11 @@ unsafe extern "C" fn get_static_field_id(
 unsafe fn field_get(o: JObject, f: *const Field) -> JValue {
     let f = unsafe { &*f };
     let v = if f.is_static {
-        f.class.statics.lock().unwrap().get(&(f as *const Field as usize)).cloned()
+        f.class.statics.lock().unwrap().get(&f.name).cloned()
     } else {
         match unsafe { obj(o) } {
             Some(Object::Instance(i)) => {
-                i.fields.lock().unwrap().get(&(f as *const Field as usize)).cloned()
+                i.fields.lock().unwrap().get(&f.name).cloned()
             }
             _ => None,
         }
@@ -385,7 +385,7 @@ unsafe fn field_get(o: JObject, f: *const Field) -> JValue {
 
 unsafe fn field_set(o: JObject, f: *const Field, v: JValue) {
     let f = unsafe { &*f };
-    let key = f as *const Field as usize;
+    let key = f.name.clone();
     if f.is_static {
         f.class.statics.lock().unwrap().insert(key, v);
     } else if let Some(Object::Instance(i)) = unsafe { obj(o) } {
@@ -839,7 +839,7 @@ fn build_env_table() -> [usize; ENV_SLOTS] {
 }
 
 struct Tables {
-    env: usize,
+    env_fns: usize,
     vm: usize,
 }
 
@@ -857,23 +857,34 @@ fn tables() -> &'static Tables {
             vm_get_env as usize,
             vm_attach as usize, // AttachCurrentThreadAsDaemon
         ]));
-        let env = Box::leak(Box::new(JNIEnv {
-            functions: env_fns.as_ptr(),
-        }));
         let vm = Box::leak(Box::new(JavaVM {
             functions: vm_fns.as_ptr(),
         }));
         Tables {
-            env: env as *mut JNIEnv as usize,
+            env_fns: env_fns.as_ptr() as usize,
             vm: vm as *mut JavaVM as usize,
         }
     })
 }
 
-/// The `JNIEnv*` to pass to guest code (shared by all threads; per-thread
-/// state lives in host thread-locals).
+thread_local! {
+    static ENV: std::cell::Cell<*mut JNIEnv> = const { std::cell::Cell::new(std::ptr::null_mut()) };
+}
+
+/// The calling thread's `JNIEnv*`.
+///
+/// Each thread gets its own structure, as on a real VM: the engine swaps
+/// the function table pointer of the env it is given for an instrumented
+/// copy, and assumes that has not already happened on another thread.
 pub fn env() -> *mut JNIEnv {
-    tables().env as *mut JNIEnv
+    ENV.with(|e| {
+        if e.get().is_null() {
+            e.set(Box::into_raw(Box::new(JNIEnv {
+                functions: tables().env_fns as *const usize,
+            })));
+        }
+        e.get()
+    })
 }
 
 pub fn java_vm() -> *mut JavaVM {

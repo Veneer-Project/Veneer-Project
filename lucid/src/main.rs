@@ -1,9 +1,14 @@
 //! lucid: run the Android x86-64 build of Roblox on Linux.
 
 mod app;
+mod crash;
+mod device;
 mod install;
+#[macro_use]
+mod java;
 mod paths;
 mod runtime;
+mod startup;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -77,7 +82,8 @@ fn cmd_install(args: &[String]) -> ExitCode {
     match install::install(&apks) {
         Ok(s) => {
             println!(
-                "installed {} libraries and {} assets into {}",
+                "installed Roblox {} ({} libraries, {} assets) into {}",
+                s.version.as_deref().unwrap_or("(unknown version)"),
                 s.libs,
                 s.assets,
                 paths::data_dir().display()
@@ -93,6 +99,7 @@ fn cmd_install(args: &[String]) -> ExitCode {
 
 fn main() -> ExitCode {
     init_logging();
+    crash::install();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("install") => cmd_install(&args[1..]),
