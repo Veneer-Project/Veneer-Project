@@ -79,11 +79,6 @@ fn stream_of(this: Option<&Ref>) -> Option<usize> {
     data.as_ref()?.downcast_ref::<Stream>().map(|s| s.0)
 }
 
-/// Whether an output device is available.
-pub fn available() -> bool {
-    pulse().is_some()
-}
-
 pub fn install() {
     let vm = vm();
     vm.on(DEVICE, "<init>", "()V", |_, _| ());

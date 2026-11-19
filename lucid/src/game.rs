@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use lucid_jni::{JObject, JValue, Ref, from_raw, new_instance, vm, with_frame};
 use serde_json::Value;
 
-use crate::java::{jstr, local, user};
+use crate::java::{local, user};
 use crate::jcall;
 use crate::jcall_on;
 use crate::startup;
@@ -130,6 +130,7 @@ pub fn launch(l: Launch) {
         return;
     }
     log::info!("joining place {} (request type {})", l.place_id, l.request_type());
+    crate::presence::set(crate::presence::State::InGame { place_id: l.place_id });
     let u = user();
     with_frame(|| {
         // On Android the app shell's surface goes away when the game
@@ -202,6 +203,7 @@ pub fn on_left() {
     if !IN_GAME.swap(false, Ordering::AcqRel) {
         return;
     }
+    crate::presence::set(crate::presence::State::Browsing);
     // Runs on its own thread: we are inside an engine callback here.
     std::thread::spawn(|| {
         with_frame(|| {
@@ -267,5 +269,4 @@ pub fn subscribe() {
             log::debug!("subscribed to launch requests");
         }
     });
-    let _ = jstr; // (kept for symmetry with other modules)
 }

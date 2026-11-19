@@ -11,6 +11,7 @@ mod install;
 #[macro_use]
 mod java;
 mod paths;
+mod presence;
 mod runtime;
 mod startup;
 
@@ -62,7 +63,8 @@ fn usage() -> ExitCode {
          lucid run [--place <id>]                             start Roblox (optionally joining a place)\n  \
          lucid probe                                          load the engine without a window (debug)\n\n\
          environment:\n  \
-         LUCID_LOG=error|warn|info|debug|trace   log verbosity"
+         LUCID_LOG=error|warn|info|debug|trace   log verbosity\n  \
+         LUCID_DISCORD_CLIENT_ID=<app id>        enable Discord Rich Presence"
     );
     ExitCode::from(2)
 }

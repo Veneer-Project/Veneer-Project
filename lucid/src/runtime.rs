@@ -71,6 +71,7 @@ impl app::Frontend for Engine {
         }
         startup::start_app(&self.device, window, &self.cookies);
         game::subscribe();
+        crate::presence::start();
         if let Some(place) = self.join_place.take() {
             std::thread::spawn(move || game::launch(game::Launch::place(place)));
         }
