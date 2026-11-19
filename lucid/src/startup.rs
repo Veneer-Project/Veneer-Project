@@ -149,15 +149,64 @@ fn fetch_client_settings() -> Result<(String, String), Box<dyn Error>> {
     Ok((body, signature))
 }
 
+/// Fast flag overrides: lucid's own defaults, then the user's
+/// `fflags.json` (a JSON object, e.g. `{"DFIntTaskSchedulerTargetFps": 144}`)
+/// in lucid's config directory.
+fn flag_overrides() -> Option<String> {
+    let mut flags = serde_json::Map::new();
+    for (k, v) in crate::flags::DEFAULTS {
+        flags.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+    }
+    let path = paths::config_dir().join("fflags.json");
+    match fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&text) {
+            Ok(user) => {
+                log::info!("applying {} fast flag overrides from {}", user.len(), path.display());
+                for (k, v) in user {
+                    // The engine wants every value as a string.
+                    let v = match v {
+                        serde_json::Value::String(s) => s,
+                        other => other.to_string(),
+                    };
+                    flags.insert(k, serde_json::Value::String(v));
+                }
+            }
+            Err(e) => log::warn!("ignoring {}: {e}", path.display()),
+        },
+        Err(_) => {}
+    }
+    if let Ok(extra) = std::env::var("LUCID_FFLAGS") {
+        if let Ok(m) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&extra) {
+            for (k, v) in m {
+                let v = match v {
+                    serde_json::Value::String(s) => s,
+                    other => other.to_string(),
+                };
+                flags.insert(k, serde_json::Value::String(v));
+            }
+        }
+    }
+    if flags.is_empty() {
+        None
+    } else {
+        serde_json::to_string(&flags).ok()
+    }
+}
+
 /// Fetch client settings and hand them to the engine.
 pub fn client_settings() -> Result<(), Box<dyn Error>> {
     let (body, signature) = fetch_client_settings()?;
     log::info!("client settings: {} bytes", body.len());
     let signed = body.contains("\"FFlagPassFlagSignatureToEngine\":\"True\"")
         || body.contains("\"FFlagPassFlagSignatureToEngine\":\"true\"");
+    let overrides = flag_overrides();
     let result = with_frame(|| {
-        // The overrides argument is null unless a local override file exists.
-        let null: JObject = std::ptr::null_mut();
+        // Overrides are a flat JSON object of flag name -> string value
+        // (Android reads them from ClientAppSettings.json), or null.
+        let ov: JObject = match &overrides {
+            Some(json) => jstr(json),
+            None => std::ptr::null_mut(),
+        };
         if signed {
             jcall!(
                 GL,
@@ -166,7 +215,7 @@ pub fn client_settings() -> Result<(), Box<dyn Error>> {
                 fn(JObject, JObject, JObject, JObject) -> i32,
                 jstr(&body),
                 jstr(&signature),
-                null,
+                ov,
                 jstr(SETTINGS_GROUP)
             )
         } else {
@@ -176,7 +225,7 @@ pub fn client_settings() -> Result<(), Box<dyn Error>> {
                 "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)I",
                 fn(JObject, JObject, JObject) -> i32,
                 jstr(&body),
-                null,
+                ov,
                 jstr(SETTINGS_GROUP)
             )
         }

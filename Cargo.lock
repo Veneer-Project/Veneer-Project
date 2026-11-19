@@ -714,6 +714,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 name = "lucid"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "libc",
  "log",
  "lucid-android",
@@ -724,6 +725,8 @@ dependencies = [
  "raw-window-handle",
  "serde_json",
  "ureq",
+ "wayland-backend",
+ "wayland-client",
  "winit",
  "zip",
 ]

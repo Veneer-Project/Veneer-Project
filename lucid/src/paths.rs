@@ -43,3 +43,12 @@ pub fn cache_dir() -> PathBuf {
 pub fn sober_package_dir() -> PathBuf {
     home().join(".var/app/org.vinegarhq.Sober/data/sober/packages/x86_64/com.roblox.client")
 }
+
+/// `$XDG_CONFIG_HOME/lucid` (default `~/.config/lucid`): user configuration.
+pub fn config_dir() -> PathBuf {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| home().join(".config"))
+        .join("lucid")
+}

@@ -5,11 +5,13 @@ mod audio;
 mod cookies;
 mod crash;
 mod device;
+mod flags;
 mod game;
 mod input;
 mod install;
 #[macro_use]
 mod java;
+mod overlay;
 mod paths;
 mod prefs;
 mod presence;

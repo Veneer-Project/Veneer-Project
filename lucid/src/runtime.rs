@@ -72,6 +72,7 @@ impl app::Frontend for Engine {
         startup::start_app(&self.device, window, &self.cookies);
         game::subscribe();
         input::spawn_test_keys();
+        input::spawn_test_clicks();
         crate::presence::start();
         if let Some(place) = self.join_place.take() {
             std::thread::spawn(move || game::launch(game::Launch::place(place)));

@@ -11,6 +11,7 @@ use winit::platform::scancode::PhysicalKeyExtScancode;
 
 use crate::java::jstr;
 use crate::jcall;
+use crate::overlay::{self, Geometry};
 
 const INPUT: &str = "com/roblox/engine/jni/NativeInputInterface";
 const GL: &str = "com/roblox/engine/jni/NativeGLInterface";
@@ -25,6 +26,31 @@ struct TextBox {
 }
 
 static TEXT_BOX: Mutex<Option<TextBox>> = Mutex::new(None);
+
+/// Read a `NativeTextBoxInfo` object into overlay geometry.
+fn geometry_of(info: Option<&lucid_jni::Ref>) -> Option<Geometry> {
+    let i = info?.as_instance()?;
+    let f = |name: &str| i.get(name).map(|v| v.as_f64() as f32).unwrap_or(0.0);
+    let n = |name: &str| i.get(name).map(|v| v.as_i64()).unwrap_or(0);
+    let g = Geometry {
+        x: f("x"),
+        y: f("y"),
+        width: f("width"),
+        height: f("height"),
+        font_size: f("fontSize"),
+        color: n("textColor") as u32,
+        x_align: n("xAlignment") as i32,
+        // Enum.TextInputType.Password
+        password: n("textInputType") == 5,
+    };
+    (g.width > 0.0 && g.height > 0.0).then_some(g)
+}
+
+/// Push the current text box contents to the overlay.
+fn show_text(tb: &TextBox) {
+    let text: String = tb.text.iter().collect();
+    overlay::set_text(&text, tb.cursor);
+}
 
 /// Register the text box callbacks the engine calls.
 pub fn install() {
@@ -41,14 +67,41 @@ pub fn install() {
                 .and_then(|o| o.as_prim_array())
                 .map(|p| String::from_utf8_lossy(p.bytes()).chars().collect())
                 .unwrap_or_default();
-            log::debug!("text box {handle:#x} focused");
+            log::debug!("text box {handle:#x} focused (native overlay: {})", a[1].as_i64() != 0);
             let cursor = text.len();
-            *TEXT_BOX.lock().unwrap() = Some(TextBox { handle, text, cursor });
+            let tb = TextBox { handle, text, cursor };
+            // With "native overlay" set, the engine leaves drawing the
+            // text being edited to the platform.
+            if a[1].as_i64() != 0 {
+                show_text(&tb);
+                if let Some(g) = geometry_of(a.get(3).and_then(JValue::as_object)) {
+                    overlay::show(g);
+                }
+            }
+            *TEXT_BOX.lock().unwrap() = Some(tb);
         },
     );
+    // The engine describes the focused text box by constructing this.
+    const INFO: &str = "com/roblox/engine/jni/model/NativeTextBoxInfo";
+    const NAMES: [&str; 19] = [
+        "x", "y", "width", "height", "fontSize", "multiline", "xAlignment", "yAlignment",
+        "textColor", "font", "textInputType", "returnKeyType", "manualFocusRelease",
+        "textWrapped", "editable", "paddingLeft", "paddingTop", "paddingRight", "paddingBottom",
+    ];
+    for sig in ["(FFFFFZIIIIIIZZZ)V", "(FFFFFZIIIIIIZZZFFFF)V"] {
+        vm.on(INFO, "<init>", sig, |this, a| {
+            if let Some(i) = this.and_then(|t| t.as_instance()) {
+                for (name, v) in NAMES.iter().zip(a) {
+                    i.set(name, v.clone());
+                }
+                log::debug!("text box info {a:?}");
+            }
+        });
+    }
     vm.on(GL_JAVA, "hideKeyboard", "()V", |_, _| {
         log::debug!("text box released");
         *TEXT_BOX.lock().unwrap() = None;
+        overlay::hide();
     });
     vm.on(
         GL_JAVA,
@@ -60,11 +113,34 @@ pub fn install() {
                 if text != tb.text {
                     tb.cursor = tb.cursor.min(text.len());
                     tb.text = text;
+                    show_text(tb);
                 }
             }
         },
     );
-    vm.on(GL_JAVA, "onLuaTextBoxPropertyChangedCallback", "()V", |_, _| ());
+    // The box moved or was restyled: fetch the new geometry (on another
+    // thread, since this is called from inside the engine).
+    vm.on(GL_JAVA, "onLuaTextBoxPropertyChangedCallback", "()V", |_, _| {
+        if TEXT_BOX.lock().unwrap().is_none() {
+            return;
+        }
+        std::thread::spawn(|| {
+            let info = with_frame(|| {
+                let r = jcall!(
+                    GL,
+                    "nativeGetTextBoxInfo",
+                    "()Lcom/roblox/engine/jni/model/NativeTextBoxInfo;",
+                    fn() -> JObject,
+                )?;
+                unsafe { lucid_jni::from_raw(r) }
+            });
+            if let Some(g) = geometry_of(info.as_ref()) {
+                if TEXT_BOX.lock().unwrap().is_some() {
+                    overlay::show(g);
+                }
+            }
+        });
+    });
 }
 
 /// Android `KEYCODE_*` for a physical key.
@@ -191,6 +267,9 @@ fn edit_text(event: &KeyEvent) -> bool {
     let cursor = tb.text[..tb.cursor].iter().map(|c| c.len_utf16()).sum::<usize>();
     if enter || release {
         *guard = None;
+        overlay::hide();
+    } else if changed {
+        show_text(tb);
     }
     drop(guard);
 
@@ -318,6 +397,51 @@ pub fn spawn_test_keys() {
                 std::thread::sleep(std::time::Duration::from_millis(80));
             }
             std::thread::sleep(std::time::Duration::from_secs(8));
+        }
+    });
+}
+
+/// Debug aid: `LUCID_TEST_CLICK="x,y;x,y"` clicks those points (in dp),
+/// one every 3 seconds, starting 20 seconds after launch.
+pub fn spawn_test_clicks() {
+    let Ok(spec) = std::env::var("LUCID_TEST_CLICK") else {
+        return;
+    };
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(20));
+        for point in spec.split(';') {
+            let mut it = point.split(',').map(|v| v.parse::<f32>().unwrap_or(0.0));
+            let (x, y) = (it.next().unwrap_or(0.0), it.next().unwrap_or(0.0));
+            log::info!("test click at {x},{y}");
+            with_frame(|| {
+                jcall!(INPUT, "nativePassMouseMove", "(FFFF)V", fn(f32, f32, f32, f32), x, y, 0.0, 0.0);
+            });
+            for down in [1u8, 0] {
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                with_frame(|| {
+                    jcall!(INPUT, "nativePassMouseButton", "(FFZI)V", fn(f32, f32, u8, i32), x, y, down, 0);
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            // Optionally type into whatever got focus and capture the
+            // result, to check that typed text is visible.
+            if let Ok(text) = std::env::var("LUCID_TEST_TYPE") {
+                let handle = TEXT_BOX.lock().unwrap().as_ref().map(|t| t.handle);
+                if let Some(handle) = handle {
+                    log::info!("test typing into {handle:#x}");
+                    for n in 1..=text.chars().count() {
+                        let part: String = text.chars().take(n).collect();
+                        push_text(handle, &part, false, n);
+                        overlay::set_text(&part, n);
+                        std::thread::sleep(std::time::Duration::from_millis(120));
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                with_frame(|| {
+                    jcall!(GL, "takeScreenshot", "()V", fn(),);
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_secs(3));
         }
     });
 }
