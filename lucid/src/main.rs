@@ -1,6 +1,7 @@
 //! lucid: run the Android x86-64 build of Roblox on Linux.
 
 mod app;
+mod audio;
 mod cookies;
 mod crash;
 mod device;

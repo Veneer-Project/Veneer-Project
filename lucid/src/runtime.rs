@@ -7,7 +7,7 @@ use lucid_android::window::NativeWindow;
 use lucid_linker::Image;
 
 use crate::device::Device;
-use crate::{app, cookies, game, input, java, paths, startup};
+use crate::{app, audio, cookies, game, input, java, paths, startup};
 
 /// Load `libroblox.so` and run its constructors and `JNI_OnLoad`.
 fn load_engine() -> Result<&'static Image, Box<dyn Error>> {
@@ -123,6 +123,7 @@ pub fn run(probe: bool, join_place: Option<i64>) -> Result<(), Box<dyn Error>> {
     log::info!("Roblox {}", device.app_version);
     java::install(&device);
     input::install();
+    audio::install();
     load_engine()?;
     startup::application_on_create();
     if probe {
