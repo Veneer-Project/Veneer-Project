@@ -187,6 +187,16 @@ pub fn install(device: &Device) {
         crate::game::on_left();
     });
     vm.on(GL_JAVA, "screenOrientationChanged", "(I)V", |_, _| ());
+    // Older route for web pages: (title, url).
+    vm.on(
+        GL_JAVA,
+        "openNativeOverlay",
+        "(Ljava/lang/String;Ljava/lang/String;)V",
+        |_, a| {
+            let url = arg_str(a, 1);
+            std::thread::spawn(move || crate::webview::open_in_browser(&url));
+        },
+    );
     vm.on(GL_JAVA, "listenToMotionEvents", "(Ljava/lang/String;)V", |_, _| ());
     vm.on(GL_JAVA, "onVrSessionStateUpdate", "(I)V", |_, _| ());
 

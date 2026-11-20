@@ -5,27 +5,19 @@
 //! surface. Afterwards the engine reports `gameDidLeave` and the app shell
 //! is started again.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use lucid_jni::{JObject, JValue, Ref, from_raw, new_instance, vm, with_frame};
+use lucid_jni::{JObject, JValue, new_instance, with_frame};
 use serde_json::Value;
 
 use crate::java::{local, user};
 use crate::jcall;
-use crate::jcall_on;
 use crate::startup;
 
 const GL: &str = "com/roblox/engine/jni/NativeGLInterface";
 const REPORTING: &str = "com/roblox/engine/jni/NativeReportingInterface";
-const BUS: &str = "com/roblox/universalapp/messagebus/MessageBus";
-const RAW_CALLBACK: &str = "com/roblox/universalapp/messagebus/RawCallback";
-const CALLBACK_IMPL: &str = "com/roblox/universalapp/messagebus/MessageBus$a";
-const CONNECTION: &str = "com/roblox/universalapp/messagebus/Connection";
 
 static IN_GAME: AtomicBool = AtomicBool::new(false);
-/// Objects the engine holds references to for the process lifetime.
-static KEEP: Mutex<Vec<Ref>> = Mutex::new(Vec::new());
 
 pub fn in_game() -> bool {
     IN_GAME.load(Ordering::Acquire)
@@ -235,55 +227,23 @@ fn spawn_test_leave() {
 
 /// Listen for launch requests from the Lua app.
 pub fn subscribe() {
-    let vm = vm();
-    vm.set_super(CALLBACK_IMPL, RAW_CALLBACK);
-    for class in [CALLBACK_IMPL, RAW_CALLBACK] {
-        vm.on(class, "run", "(Ljava/lang/String;)V", |_, a| {
-            let json = a[0].as_str().unwrap_or("").to_string();
-            log::debug!("launch request: {json}");
-            match Launch::from_json(&json) {
-                Some(l) => {
-                    std::thread::spawn(move || launch(l));
-                }
-                None => log::warn!("unparseable launch request: {json}"),
+    let Some(id) = crate::bus::static_string(
+        "com/roblox/universalapp/experience/JNIExperienceProtocol",
+        "getLaunchId",
+    ) else {
+        log::error!("no launch message id; joining games will not work");
+        return;
+    };
+    let ok = crate::bus::subscribe(&id, |json| {
+        log::debug!("launch request: {json}");
+        match Launch::from_json(json) {
+            Some(l) => {
+                std::thread::spawn(move || launch(l));
             }
-        });
+            None => log::warn!("unparseable launch request: {json}"),
+        }
+    });
+    if ok {
+        log::debug!("subscribed to launch requests");
     }
-    vm.on(CONNECTION, "<init>", "(J)V", |this, a| {
-        if let Some(i) = this.and_then(|t| t.as_instance()) {
-            i.set("f9884a", a[0].as_i64());
-        }
-    });
-
-    with_frame(|| {
-        let id = jcall!(
-            "com/roblox/universalapp/experience/JNIExperienceProtocol",
-            "getLaunchId",
-            "()Ljava/lang/String;",
-            fn() -> JObject,
-        );
-        let Some(id) = id.filter(|p| !p.is_null()) else {
-            log::error!("no launch message id; joining games will not work");
-            return;
-        };
-        let bus = new_instance(BUS);
-        let callback = new_instance(CALLBACK_IMPL);
-        let conn = jcall_on!(
-            local(&bus);
-            BUS,
-            "doSubscribeRaw",
-            "(Ljava/lang/String;Lcom/roblox/universalapp/messagebus/RawCallback;Z)Lcom/roblox/universalapp/messagebus/Connection;",
-            fn(JObject, JObject, u8) -> JObject,
-            id,
-            local(&callback),
-            0
-        );
-        let mut keep = KEEP.lock().unwrap();
-        keep.push(bus);
-        keep.push(callback);
-        if let Some(c) = conn.and_then(|c| unsafe { from_raw(c) }) {
-            keep.push(c);
-            log::debug!("subscribed to launch requests");
-        }
-    });
 }

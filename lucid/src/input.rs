@@ -561,6 +561,12 @@ pub fn spawn_test_clicks() {
                 });
             }
             std::thread::sleep(std::time::Duration::from_secs(2));
+            if std::env::var_os("LUCID_TEST_SHOT").is_some() {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                with_frame(|| {
+                    jcall!(GL, "takeScreenshot", "()V", fn(),);
+                });
+            }
             // Optionally type into whatever got focus and capture the
             // result, to check that typed text is visible.
             if let Ok(text) = std::env::var("LUCID_TEST_TYPE") {

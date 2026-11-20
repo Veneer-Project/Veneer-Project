@@ -71,6 +71,7 @@ impl app::Frontend for Engine {
         }
         startup::start_app(&self.device, window, &self.cookies);
         game::subscribe();
+        crate::webview::install();
         input::spawn_test_keys();
         input::spawn_test_clicks();
         crate::presence::start();
@@ -135,6 +136,7 @@ pub fn run(probe: bool, join_place: Option<i64>) -> Result<(), Box<dyn Error>> {
     java::install(&device);
     input::install();
     audio::install();
+    crate::bus::install();
     crate::prefs::install();
     load_engine()?;
     startup::application_on_create();
@@ -146,7 +148,8 @@ pub fn run(probe: bool, join_place: Option<i64>) -> Result<(), Box<dyn Error>> {
     // Keep the saved session in step with what the engine reports. The
     // save runs on its own thread: the notification arrives inside an
     // engine callback.
-    java::set_notification_sink(|(kind, _)| match kind.as_str() {
+    java::set_notification_sink(|(kind, data)| match kind.as_str() {
+        _ if crate::webview::handle_notification(&kind, &data) => {}
         "DID_LOG_IN" | "DID_SIGN_UP" | "DID_SWITCH_ACCOUNT" => {
             std::thread::spawn(cookies::save);
         }

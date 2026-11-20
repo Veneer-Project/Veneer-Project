@@ -31,6 +31,8 @@ Working (confirmed by use):
 - In-game settings are saved between sessions
 - Keys no longer stick after Alt+Tab
 - Discord Rich Presence: "In the menu", or the experience's name and icon
+- Screens that are web pages on Android (private servers and similar) open
+  in your own browser instead of leaving an empty screen
 
 Written but not confirmed:
 
@@ -39,6 +41,8 @@ Written but not confirmed:
 Not implemented:
 
 - Gamepads, touch, in-game video, camera, voice chat
+- An embedded web view: web-page screens open in the system browser, where
+  they do not share the app's login and cannot start a game in lucid
 - The "fullscreen" switch inside Roblox's own settings (use F11)
 - Mouse selection inside text boxes, multi-line text boxes (drawn as one line)
 - Crash reporting (Crashpad is deliberately never started)
@@ -120,6 +124,7 @@ lucid/           The launcher binary:
   audio.rs       FMOD output (Pulse)    prefs.rs     SharedPreferences
   cookies.rs     login persistence      presence.rs  Discord presence
   flags.rs       default fast flags     crash.rs     fatal signal reporter
+  bus.rs         engine message bus     webview.rs   web pages -> system browser
   device.rs      device identity        paths.rs     directories
 ```
 

@@ -2,6 +2,7 @@
 
 mod app;
 mod audio;
+mod bus;
 mod cookies;
 mod crash;
 mod device;
@@ -18,6 +19,7 @@ mod presence;
 mod runtime;
 mod startup;
 mod update;
+mod webview;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
