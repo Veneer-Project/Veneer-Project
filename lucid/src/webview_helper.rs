@@ -148,13 +148,20 @@ fn parent_allows(state: &mut State, url: &str) -> bool {
         let Some(lines) = read_lines(&mut state.pending, 100) else {
             return false;
         };
+        // Go through the whole batch: the reply is often followed at once
+        // by another command (such as CLOSE), which must not be dropped.
+        let mut decision = None;
         for line in lines {
             if line == format!("ALLOW {id}") {
-                return true;
+                decision = Some(true);
             } else if line == format!("DENY {id}") {
-                return false;
+                decision = Some(false);
+            } else {
+                state.queued.push(line);
             }
-            state.queued.push(line);
+        }
+        if let Some(allowed) = decision {
+            return allowed;
         }
     }
     // No answer: behave like a normal browser.
