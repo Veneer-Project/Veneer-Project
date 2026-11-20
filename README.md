@@ -30,6 +30,7 @@ Working (confirmed by use):
 - Automatic download and update of the game from Google Play at startup
   (updated 2.745.1142 to 2.747.1486 this way)
 - Install from APK files, or from an existing Sober install
+- Only APKs signed by Roblox are installed (see "Only genuine APKs" below)
 - Engine boot, home page, login (the session persists across restarts)
 - Joining experiences, from the app or directly with `--place`
 - Leaving back to the home page
@@ -171,6 +172,29 @@ Environment variables:
 | `LUCID_LENIENT` | Calls to unresolved imports return 0 instead of aborting |
 | `LUCID_NO_GUEST_SIGNALS` | Ignore signal handlers the engine tries to install |
 
+## Only genuine APKs
+
+The game's native code runs with your user's full permissions, so a modified
+APK (cheats, malware) could do anything you can. Before installing, Veneer
+checks every APK's Android signature (APK Signature Scheme v2, v3 and v3.1,
+which covers every byte of the file) and installs it only if it was signed
+by Roblox. This applies to Google Play downloads, `veneer install` and Sober
+installs alike, and happens before the current install is touched, so a
+refused APK leaves the game as it was. There is deliberately no option to
+skip it.
+
+- Roblox's original signing certificate is pinned by its SHA-256,
+  `44932ea35a17a267372d71b54d1a0cb3da0dca5113e94406ae2fe18090ba1477`
+  (Roblox Corporation, 2014; APKMirror lists the same fingerprint for every
+  Roblox release).
+- Roblox has since moved Android 13+ to a newer key (2026). That key is
+  accepted because Roblox's APKs carry Android's proof-of-rotation, in which
+  the original key signs the new certificate; Veneer checks that chain.
+- Limits: the original key is 1024-bit RSA, weak by today's standards, and
+  everything else rests on it. And Veneer is open source: someone can build
+  a copy without the check. It stops modified APKs being installed by
+  Veneer as published, not a modified Veneer.
+
 ## How it works
 
 ```
@@ -188,6 +212,7 @@ crates/jni       A fake JavaVM/JNIEnv with a small object model. "Java" methods
 crates/discord   Discord IPC client (no dependencies).
 lucid/           The launcher (builds the `veneer` binary):
   install.rs     unpack APKs            startup.rs   the Android app's startup sequence
+  apk_signature.rs  APK signature check (only Roblox-signed APKs are installed)
   update.rs      Google Play download and update check
   runtime.rs     load engine, run       java.rs      static callback classes, jcall! macro
   app.rs         winit window/events    game.rs      join / leave experiences

@@ -1,5 +1,5 @@
-//! Installing the game: unpack the native libraries and assets from the
-//! Roblox APK(s) into lucid's data directory.
+//! Installing the game: check that the APK(s) are Roblox's, then unpack the
+//! native libraries and assets into Veneer's data directory.
 
 use std::fs::{self, File};
 use std::io;
@@ -86,8 +86,29 @@ fn extract(apk: &Path, summary: &mut Summary) -> io::Result<()> {
     Ok(())
 }
 
-/// Unpack the given APK files (base + ABI split, in any order).
+/// Check and unpack the given APK files (base + ABI split, in any order).
 pub fn install(apks: &[PathBuf]) -> io::Result<Summary> {
+    // Every APK must be signed by Roblox, before anything is touched: the
+    // game's native code runs with the user's permissions, so a modified APK
+    // (cheats, malware) is refused. There is deliberately no way to skip this.
+    for apk in apks {
+        log::info!("checking the signature of {}", apk.display());
+        match crate::apk_signature::verify(apk) {
+            Ok(v) => log::info!(
+                "{}: signed by Roblox (scheme {}{})",
+                apk.display(),
+                v.scheme,
+                if v.rotated { ", current key, vouched for by the original" } else { "" }
+            ),
+            Err(e) => {
+                return Err(io::Error::other(format!(
+                    "{} is not a genuine Roblox APK, so it was not installed ({e}). \
+                     Only APKs signed by Roblox can be installed.",
+                    apk.display()
+                )));
+            }
+        }
+    }
     // Start from a clean app directory so files from an old version
     // cannot linger. User data (files/, cache) is kept.
     let app = paths::data_dir().join("app");

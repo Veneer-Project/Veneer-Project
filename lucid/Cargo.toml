@@ -32,6 +32,8 @@ smithay-clipboard = "0.7.3"
 gpapi = "6.1.0"
 # Decodes the window icon for X11.
 png = "0.18.1"
+# Checks APK signatures (already in the build through rustls).
+ring = "0.17"
 tokio = { version = "1.54.1", features = ["rt"] }
 
 # gpapi talks to Google Play through OpenSSL. By default OpenSSL is built

@@ -1220,6 +1220,7 @@ dependencies = [
  "png",
  "raw-window-handle",
  "reqwest",
+ "ring",
  "serde_json",
  "smithay-clipboard",
  "tokio",

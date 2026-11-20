@@ -1,5 +1,6 @@
 //! Veneer (codename Lucid): run the Android x86-64 build of Roblox on Linux.
 
+mod apk_signature;
 mod app;
 mod audio;
 mod bus;
@@ -33,15 +34,17 @@ struct Logger {
     file: Option<std::sync::Mutex<std::fs::File>>,
 }
 
-/// A log line's origin without the codename crate prefix, which people
-/// would otherwise see: `lucid::update` → `update`, `lucid_linker::stubs`
-/// → `linker::stubs`, the binary's own root module → `veneer`.
+/// A log line's origin without the crate prefix, which people would
+/// otherwise see: `veneer::update` (the binary's modules) → `update`,
+/// `lucid_linker::stubs` (the codename library crates) → `linker::stubs`,
+/// the binary's root module → `veneer`.
 fn short_target(target: &str) -> &str {
-    if target == "lucid" {
+    if target == "veneer" || target == "lucid" {
         return "veneer";
     }
     target
-        .strip_prefix("lucid::")
+        .strip_prefix("veneer::")
+        .or_else(|| target.strip_prefix("lucid::"))
         .or_else(|| target.strip_prefix("lucid_"))
         .unwrap_or(target)
 }
@@ -234,6 +237,8 @@ mod tests {
     #[test]
     fn short_target_hides_the_codename() {
         use super::short_target;
+        assert_eq!(short_target("veneer::update"), "update");
+        assert_eq!(short_target("veneer"), "veneer");
         assert_eq!(short_target("lucid::update"), "update");
         assert_eq!(short_target("lucid_linker::stubs"), "linker::stubs");
         assert_eq!(short_target("lucid_jni"), "jni");
