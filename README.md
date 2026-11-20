@@ -66,6 +66,18 @@ cargo build
 ./target/debug/lucid probe                      # boot the engine without a window
 ```
 
+For an optimized build, use `--release`; the binary is then in
+`target/release` instead:
+
+```sh
+cargo build --release
+./target/release/lucid run                      # download/update the game if needed, then start
+./target/release/lucid update                   # only download/update
+./target/release/lucid install --from-sober     # manual install; or: install base.apk split_config.x86_64.apk
+./target/release/lucid run --place 1818         # join a place directly
+./target/release/lucid probe                    # boot the engine without a window
+```
+
 On every start, `lucid run` checks Google Play for the current Roblox release
 and downloads it if the game is missing or out of date (`--no-update` or
 `LUCID_NO_UPDATE=1` skips this). Google Play needs a signed-in account, so
