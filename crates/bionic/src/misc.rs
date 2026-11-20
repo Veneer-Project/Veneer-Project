@@ -191,6 +191,45 @@ unsafe extern "C" fn guest_abort() -> ! {
     }
 }
 
+// --- W^X watch -----------------------------------------------------------------
+//
+// The guest's own mmap/mprotect go to the host unchanged, but a request for
+// memory that is writable *and* executable is logged, so a W^X break caused
+// by the engine (e.g. a JIT) shows up in the log instead of going unnoticed.
+// Not refused (yet): no current build asks for it, and refusing could break
+// a future engine update outright.
+
+fn note_wx(what: &str, addr: *mut c_void, len: size_t, prot: c_int) {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static SEEN: AtomicU32 = AtomicU32::new(0);
+    if prot & libc::PROT_WRITE == 0 || prot & libc::PROT_EXEC == 0 {
+        return;
+    }
+    // Loud for the first few, then quiet so a JIT cannot flood the log.
+    if SEEN.fetch_add(1, Ordering::Relaxed) < 16 {
+        log::warn!("W^X: guest {what}({addr:p}, {len:#x}) asked for write+exec memory");
+    } else {
+        log::debug!("W^X: guest {what}({addr:p}, {len:#x}) asked for write+exec memory");
+    }
+}
+
+unsafe extern "C" fn guest_mmap(
+    addr: *mut c_void,
+    len: size_t,
+    prot: c_int,
+    flags: c_int,
+    fd: c_int,
+    off: libc::off_t,
+) -> *mut c_void {
+    note_wx("mmap", addr, len, prot);
+    unsafe { libc::mmap(addr, len, prot, flags, fd, off) }
+}
+
+unsafe extern "C" fn guest_mprotect(addr: *mut c_void, len: size_t, prot: c_int) -> c_int {
+    note_wx("mprotect", addr, len, prot);
+    unsafe { libc::mprotect(addr, len, prot) }
+}
+
 // --- process control we do not let the guest do ------------------------------
 
 unsafe extern "C" fn fork() -> c_int {
@@ -270,6 +309,9 @@ pub fn symbols(m: &mut HashMap<&'static str, usize>) {
     m.insert("__assert2", assert2_fail as usize);
     m.insert("android_set_abort_message", set_abort_message as usize);
     m.insert("abort", guest_abort as usize);
+    m.insert("mmap", guest_mmap as usize);
+    m.insert("mmap64", guest_mmap as usize);
+    m.insert("mprotect", guest_mprotect as usize);
     m.insert("fork", fork as usize);
     m.insert("execv", exec_denied as usize);
     m.insert("execve", exec_denied as usize);

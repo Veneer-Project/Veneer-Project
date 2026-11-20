@@ -360,6 +360,7 @@ struct DynInfo {
     init_arraysz: usize,
     needed: Vec<u64>,
     soname: Option<u64>,
+    textrel: bool,
 }
 
 unsafe fn gnu_hash_nsyms(table: usize) -> usize {
@@ -484,9 +485,16 @@ fn load_inner(path: &Path, file: &File, view: usize, len: usize) -> Result<Image
             DT_INIT => d.init = ptr,
             DT_INIT_ARRAY => d.init_array = ptr,
             DT_INIT_ARRAYSZ => d.init_arraysz = val,
+            DT_TEXTREL => d.textrel = true,
+            DT_FLAGS if e.d_val & DF_TEXTREL != 0 => d.textrel = true,
             _ => {}
         }
         p = unsafe { p.add(1) };
+    }
+    if d.textrel {
+        // Text relocations would write into read+exec code (W^X); bionic
+        // refuses them too since API 23.
+        return Err(LoadError::Format("text relocations are not supported (W^X)"));
     }
     if d.symtab == 0 || d.strtab == 0 {
         return Err(LoadError::Format("missing dynamic symbol table"));
