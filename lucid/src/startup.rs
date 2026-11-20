@@ -20,6 +20,9 @@ const BRIDGE: &str = "com/roblox/engine/jni/NativeAppBridgeInterface";
 const INPUT: &str = "com/roblox/engine/jni/NativeInputInterface";
 const REPORTING: &str = "com/roblox/engine/jni/NativeReportingInterface";
 
+/// The user agent the app identifies with (also used by the web view).
+pub static USER_AGENT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 const S_V: &str = "(Ljava/lang/String;)V";
 const SS_V: &str = "(Ljava/lang/String;Ljava/lang/String;)V";
 
@@ -342,6 +345,7 @@ pub fn update_surface(window: &NativeWindow) {
 pub fn start_app(device: &Device, window: &NativeWindow, cookies: &str) {
     let (w, h) = window.size();
     let ua = device.user_agent(w, h, window.density());
+    let _ = USER_AGENT.set(ua.clone());
     with_frame(|| {
         jcall!(INPUT, "nativeSetGyroscopeEnabled", "(Z)V", fn(u8), 0);
         jcall!(INPUT, "nativeSetAccelerometerEnabled", "(Z)V", fn(u8), 0);

@@ -20,6 +20,7 @@ mod runtime;
 mod startup;
 mod update;
 mod webview;
+mod webview_helper;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -126,6 +127,10 @@ fn cmd_install(args: &[String]) -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    // The embedded browser runs as a child process of ourselves.
+    if std::env::args().nth(1).as_deref() == Some("webview") {
+        return ExitCode::from(webview_helper::run() as u8);
+    }
     init_logging();
     crash::install();
     let args: Vec<String> = std::env::args().skip(1).collect();
