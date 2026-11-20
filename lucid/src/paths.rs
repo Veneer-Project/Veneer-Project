@@ -6,13 +6,18 @@ fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// `$XDG_DATA_HOME/lucid` (default `~/.local/share/lucid`).
-pub fn data_dir() -> PathBuf {
+/// `$XDG_DATA_HOME` (default `~/.local/share`): where launchers
+/// (`applications/`) and icon themes (`icons/`) of the user live.
+pub fn data_home() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
         .unwrap_or_else(|| home().join(".local/share"))
-        .join("lucid")
+}
+
+/// `$XDG_DATA_HOME/lucid` (default `~/.local/share/lucid`).
+pub fn data_dir() -> PathBuf {
+    data_home().join("lucid")
 }
 
 /// Native libraries extracted from the APK.

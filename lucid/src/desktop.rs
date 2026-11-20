@@ -1,0 +1,198 @@
+//! Lucid's name and icon on the desktop.
+//!
+//! How a desktop finds a window's icon:
+//! - Wayland (GNOME, KDE Plasma, Budgie 10.10+ and others): a window cannot
+//!   carry its own icon. The compositor matches the window's app ID to a
+//!   launcher named `<app id>.desktop` and shows that launcher's `Icon=`.
+//! - X11 (GNOME on Xorg, Budgie 10, Xfce, ...): the window's `WM_CLASS` is
+//!   matched to a launcher's `StartupWMClass=`; when no launcher matches,
+//!   the icon stored on the window itself (`_NET_WM_ICON`) is used.
+//!
+//! So every window gets the app ID / `WM_CLASS` [`APP_ID`] and, on X11, its
+//! own icon; `lucid desktop-entry` installs the launcher and the icon theme
+//! entries that the Wayland route needs.
+
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use crate::paths;
+
+/// The title of lucid's windows.
+pub const NAME: &str = "Lucid";
+/// Wayland app ID and X11 `WM_CLASS`; also the launcher's and the icon's file name.
+pub const APP_ID: &str = "lucid";
+
+/// The logo (`assets/logo.svg`, the same image as the repository's icon),
+/// rendered at the usual icon theme sizes.
+const ICONS: &[(u32, &[u8])] = &[
+    (16, include_bytes!("../../assets/icons/16.png")),
+    (24, include_bytes!("../../assets/icons/24.png")),
+    (32, include_bytes!("../../assets/icons/32.png")),
+    (48, include_bytes!("../../assets/icons/48.png")),
+    (64, include_bytes!("../../assets/icons/64.png")),
+    (128, include_bytes!("../../assets/icons/128.png")),
+    (256, include_bytes!("../../assets/icons/256.png")),
+    (512, include_bytes!("../../assets/icons/512.png")),
+];
+const ICON_SVG: &[u8] = include_bytes!("../../assets/logo.svg");
+
+/// The icon stored on the window itself (only used on X11).
+pub fn window_icon() -> Option<winit::window::Icon> {
+    let (_, png) = ICONS.iter().find(|(size, _)| *size == 128)?;
+    let mut reader = png::Decoder::new(io::Cursor::new(*png)).read_info().ok()?;
+    let mut rgba = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut rgba).ok()?;
+    if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
+        return None;
+    }
+    rgba.truncate(info.buffer_size());
+    winit::window::Icon::from_rgba(rgba, info.width, info.height).ok()
+}
+
+fn launcher_path() -> PathBuf {
+    paths::data_home().join("applications").join(format!("{APP_ID}.desktop"))
+}
+
+fn hicolor() -> PathBuf {
+    paths::data_home().join("icons/hicolor")
+}
+
+fn icon_paths() -> Vec<PathBuf> {
+    let root = hicolor();
+    let mut v: Vec<PathBuf> = ICONS
+        .iter()
+        .map(|(s, _)| root.join(format!("{s}x{s}/apps/{APP_ID}.png")))
+        .collect();
+    v.push(root.join(format!("scalable/apps/{APP_ID}.svg")));
+    v
+}
+
+/// One argument of a launcher's `Exec=` line, escaped as the Desktop Entry
+/// specification asks: quoted if it has reserved characters, `%` doubled,
+/// and backslashes doubled again because the value is itself a string.
+fn exec_arg(arg: &str) -> Option<String> {
+    if arg.chars().any(|c| c.is_control()) {
+        return None;
+    }
+    let reserved = |c: char| " \t\"'\\><~|&;$*?#()`".contains(c);
+    let mut out = if arg.chars().any(reserved) {
+        let mut q = String::from("\"");
+        for c in arg.chars() {
+            if matches!(c, '"' | '`' | '$' | '\\') {
+                q.push('\\');
+            }
+            q.push(c);
+        }
+        q.push('"');
+        q
+    } else {
+        arg.to_string()
+    };
+    out = out.replace('%', "%%");
+    Some(out.replace('\\', "\\\\"))
+}
+
+fn launcher(exe: &Path) -> io::Result<String> {
+    let exe = exe
+        .to_str()
+        .and_then(exec_arg)
+        .ok_or_else(|| io::Error::other(format!("cannot put {} in a launcher", exe.display())))?;
+    Ok(format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Version=1.5\n\
+         Name={NAME}\n\
+         Comment=Run the Android build of Roblox on Linux\n\
+         Keywords=Roblox;\n\
+         Exec={exe} run\n\
+         Icon={APP_ID}\n\
+         Terminal=false\n\
+         Categories=Game;\n\
+         StartupWMClass={APP_ID}\n\
+         SingleMainWindow=true\n"
+    ))
+}
+
+/// Tell the desktop that launchers and icons changed. Most desktops notice
+/// by themselves; these cover the ones that keep caches.
+fn refresh() {
+    let hicolor = hicolor();
+    // Icon themes are rescanned when the theme directory's time changes.
+    let _ = std::fs::File::open(&hicolor).and_then(|f| f.set_modified(std::time::SystemTime::now()));
+    // A stale GTK icon cache would hide the new icon, so rebuild it if one exists.
+    if hicolor.join("icon-theme.cache").exists() {
+        quiet(Command::new("gtk-update-icon-cache").args(["-q", "-f", "-t"]).arg(&hicolor));
+    }
+    // KDE Plasma reads launchers through its own cache (KService).
+    if !quiet(&mut Command::new("kbuildsycoca6")) {
+        quiet(&mut Command::new("kbuildsycoca5"));
+    }
+}
+
+/// Run a helper that may not be installed; whether it ran.
+fn quiet(cmd: &mut Command) -> bool {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok()
+}
+
+fn write(path: &Path, contents: &[u8]) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(path, contents)
+}
+
+/// Install the launcher (pointing at this binary) and the icons.
+pub fn install() -> io::Result<(PathBuf, PathBuf)> {
+    let exe = std::env::current_exe()?;
+    let exe = exe.canonicalize().unwrap_or(exe);
+    let launcher_path = launcher_path();
+    for ((_, png), path) in ICONS.iter().zip(icon_paths()) {
+        write(&path, png)?;
+    }
+    write(icon_paths().last().unwrap(), ICON_SVG)?;
+    write(&launcher_path, launcher(&exe)?.as_bytes())?;
+    refresh();
+    Ok((launcher_path, exe))
+}
+
+/// Remove what [`install`] wrote; how many files were removed.
+pub fn remove() -> io::Result<usize> {
+    let mut removed = 0;
+    for path in std::iter::once(launcher_path()).chain(icon_paths()) {
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed += 1,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    refresh();
+    Ok(removed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exec_arg_escaping() {
+        assert_eq!(exec_arg("/usr/bin/lucid").unwrap(), "/usr/bin/lucid");
+        assert_eq!(
+            exec_arg("/home/a/Área de trabalho/lucid").unwrap(),
+            "\"/home/a/Área de trabalho/lucid\""
+        );
+        // `$` and `\` are escaped inside the quotes, then `\` doubled again.
+        assert_eq!(exec_arg("/a b/$x\\y").unwrap(), "\"/a b/\\\\$x\\\\\\\\y\"");
+        assert_eq!(exec_arg("/a/100%").unwrap(), "/a/100%%");
+        assert!(exec_arg("/a\nb").is_none());
+    }
+
+    #[test]
+    fn window_icon_decodes() {
+        assert!(window_icon().is_some());
+    }
+}

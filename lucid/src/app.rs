@@ -7,6 +7,8 @@ use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, DeviceId, ElementState, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+// `with_name` is shared by the Wayland and X11 extensions (same field).
+use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::raw_window_handle::{
     HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
@@ -55,8 +57,11 @@ impl<F: Frontend> ApplicationHandler for App<F> {
         if self.window.is_some() {
             return;
         }
+        // The app ID (Wayland) / WM_CLASS (X11) ties the window to the
+        // launcher `lucid desktop-entry` installs, which provides the icon.
         let attrs = Window::default_attributes()
-            .with_title("Roblox")
+            .with_title(crate::desktop::NAME)
+            .with_name(crate::desktop::APP_ID, crate::desktop::APP_ID)
             .with_inner_size(LogicalSize::new(1280.0, 720.0));
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Arc::new(w),
@@ -71,6 +76,11 @@ impl<F: Frontend> ApplicationHandler for App<F> {
             event_loop.exit();
             return;
         };
+        // X11 desktops without a matching launcher use the window's own icon;
+        // Wayland has no such thing.
+        if matches!(backend, Backend::Xlib { .. }) {
+            window.set_window_icon(crate::desktop::window_icon());
+        }
         let size = window.inner_size();
         log::info!(
             "window: {backend:?} {}x{} scale {}",

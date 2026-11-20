@@ -5,6 +5,7 @@ mod audio;
 mod bus;
 mod cookies;
 mod crash;
+mod desktop;
 mod device;
 mod flags;
 mod game;
@@ -84,7 +85,9 @@ fn usage() -> ExitCode {
          lucid run [--place <id>] [--no-update]               start Roblox (optionally joining a place);\n  \
          \x20                                                    downloads or updates the game first\n  \
          lucid update                                         only download / update the game\n  \
-         lucid probe                                          load the engine without a window (debug)\n\n\
+         lucid probe                                          load the engine without a window (debug)\n  \
+         lucid desktop-entry [--remove]                       add (or remove) Lucid with its icon to the\n  \
+         \x20                                                    app menu, pointing at this binary\n\n\
          environment:\n  \
          LUCID_LOG=error|warn|info|debug|trace   log verbosity\n  \
          LUCID_DISCORD=0                         turn Discord Rich Presence off"
@@ -126,6 +129,36 @@ fn cmd_install(args: &[String]) -> ExitCode {
     }
 }
 
+fn cmd_desktop_entry(args: &[String]) -> ExitCode {
+    if args.iter().any(|a| a == "--remove") {
+        return match desktop::remove() {
+            Ok(n) => {
+                println!("removed the launcher and icons ({n} files)");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("lucid: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    match desktop::install() {
+        Ok((launcher, exe)) => {
+            println!(
+                "installed {} and the icons; it starts {} run\n\
+                 (run this again if the binary moves, e.g. switching between debug and release builds)",
+                launcher.display(),
+                exe.display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("lucid: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     // The embedded browser runs as a child process of ourselves.
     if std::env::args().nth(1).as_deref() == Some("webview") {
@@ -136,6 +169,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("install") => cmd_install(&args[1..]),
+        Some("desktop-entry") => cmd_desktop_entry(&args[1..]),
         Some("update") => match update::ensure_current() {
             Ok(()) => {
                 println!(

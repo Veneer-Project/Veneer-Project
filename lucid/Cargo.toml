@@ -22,6 +22,8 @@ ab_glyph = "0.2"
 wayland-backend = { version = "0.3", features = ["client_system"] }
 smithay-clipboard = "0.7.3"
 gpapi = "6.1.0"
+# Decodes the window icon for X11.
+png = "0.18.1"
 tokio = { version = "1.54.1", features = ["rt"] }
 
 # gpapi talks to Google Play through OpenSSL. By default OpenSSL is built

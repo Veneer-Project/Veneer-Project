@@ -321,6 +321,18 @@ pub fn run() -> i32 {
     };
 
     unsafe {
+        // Same app ID / WM_CLASS as the game window, so the desktop shows
+        // Lucid's icon and groups the two (must happen before gtk_init).
+        // GTK would otherwise derive it from the program name, capitalised.
+        let app_id = CString::new(crate::desktop::APP_ID).unwrap();
+        if let Some(p) = optional(&glib, c"g_set_prgname") {
+            let set_prgname: unsafe extern "C" fn(*const c_char) = std::mem::transmute(p);
+            set_prgname(app_id.as_ptr());
+        }
+        if let Some(p) = optional(&gtk, c"gdk_set_program_class") {
+            let set_class: unsafe extern "C" fn(*const c_char) = std::mem::transmute(p);
+            set_class(app_id.as_ptr());
+        }
         let gtk_init_check: unsafe extern "C" fn(Ptr, Ptr) -> c_int = gtk.get(c"gtk_init_check");
         if gtk_init_check(std::ptr::null_mut(), std::ptr::null_mut()) == 0 {
             return EXIT_UNAVAILABLE;
@@ -426,10 +438,15 @@ pub fn run() -> i32 {
         });
 
         let window = window_new(0);
-        let title = if title.is_empty() { "Roblox".to_string() } else { format!("{title} - Roblox") };
+        let name = crate::desktop::NAME;
+        let title = if title.is_empty() { name.to_string() } else { format!("{title} - {name}") };
         if let Ok(t) = CString::new(title) {
             set_title(window, t.as_ptr());
         }
+        // On X11 GTK puts the theme icon on the window (installed by
+        // `lucid desktop-entry`); on Wayland the launcher provides it.
+        let set_icon_name: unsafe extern "C" fn(Ptr, *const c_char) = gtk.get(c"gtk_window_set_icon_name");
+        set_icon_name(window, app_id.as_ptr());
         set_default_size(window, 1100, 720);
         container_add(window, view);
 

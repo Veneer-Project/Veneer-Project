@@ -39,6 +39,9 @@ Working (confirmed by use):
 Written but not confirmed:
 
 - X11 (only Wayland has been run; text overlay and clipboard are Wayland-only)
+- The window icon and app menu entry (`lucid desktop-entry`): checked that the
+  launcher is valid, but not yet seen on a desktop; KDE Plasma, Budgie and
+  X11 are written from their documented behaviour only
 
 Not implemented:
 
@@ -78,6 +81,32 @@ cargo build --release
 ./target/release/lucid probe                    # boot the engine without a window
 ```
 
+### App menu and icon
+
+The window is titled "Lucid". To give it the Lucid icon and add Lucid to the
+app menu, run once (with the binary you want the menu to start):
+
+```sh
+./target/release/lucid desktop-entry            # or ./target/debug/lucid desktop-entry
+./target/release/lucid desktop-entry --remove   # undo
+```
+
+This writes `~/.local/share/applications/lucid.desktop`, which starts
+`lucid run` from the binary's current path, and the logo (the same image as
+the repository icon) into `~/.local/share/icons/hicolor/`. Run it again if
+the binary moves, for example when switching from the debug to the release
+build.
+
+It is a separate command because on Wayland (GNOME, KDE Plasma, Budgie
+10.10+) a window cannot carry its own icon: the desktop matches the window's
+app ID, `lucid`, to `lucid.desktop` and shows that launcher's icon. Without
+the launcher the window has a generic icon. On X11 (GNOME on Xorg, Budgie 10,
+Xfce) the window carries its own icon as well, so it shows even without the
+launcher. Most desktops pick up the change right away; lucid also refreshes
+the GTK icon cache if you have one and KDE's launcher cache
+(`kbuildsycoca6`/`kbuildsycoca5`). If the icon still does not show, log out
+and back in.
+
 On every start, `lucid run` checks Google Play for the current Roblox release
 and downloads it if the game is missing or out of date (`--no-update` or
 `LUCID_NO_UPDATE=1` skips this). Google Play needs a signed-in account, so
@@ -102,6 +131,7 @@ Where things live:
 | `~/.local/share/lucid/play_login.json` | The anonymous Google Play login from the last update check, reused until it expires |
 | `~/.local/share/lucid/logs/latest.log` | Debug log of the last run, overwritten each start |
 | `~/.cache/lucid/` | The app's cache directory |
+| `~/.local/share/applications/lucid.desktop`, `~/.local/share/icons/hicolor/*/apps/lucid.*` | Launcher and icons, only if you ran `lucid desktop-entry` |
 | `~/.config/lucid/fflags.json` | Optional fast-flag overrides, e.g. `{"DFIntTaskSchedulerTargetFps": 144}` (not created by lucid, see below) |
 
 lucid only reads `~/.config/lucid/`; it never creates it, so the directory
