@@ -47,19 +47,69 @@ fn device_properties_json() -> String {
     serde_json::Value::Object(map).to_string()
 }
 
-/// Get an anonymous Google Play login: `(email, auth token)`.
-fn anonymous_login() -> Result<(String, String)> {
-    let resp = ureq::post(DISPENSER)
-        .set("User-Agent", DISPENSER_USER_AGENT)
-        .set("Content-Type", "application/json")
-        .timeout(Duration::from_secs(30))
-        .send_string(&device_properties_json())
-        .map_err(|e| format!("anonymous token service: {e}"))?;
-    let v: serde_json::Value = serde_json::from_reader(resp.into_reader())?;
-    let field = |k: &str| v.get(k).and_then(|x| x.as_str()).filter(|s| !s.is_empty()).map(str::to_string);
-    match (field("email"), field("authToken")) {
-        (Some(email), Some(token)) => Ok((email, token)),
-        _ => Err("anonymous token service returned no login".into()),
+/// Ask the token service for an anonymous Google Play login:
+/// `(email, auth token)`. Retries briefly when the service is busy.
+fn request_anonymous_login() -> Result<(String, String)> {
+    let mut last: Box<dyn Error> = "anonymous token service: no attempt made".into();
+    for (attempt, wait) in [0u64, 3, 8].into_iter().enumerate() {
+        if wait > 0 {
+            std::thread::sleep(Duration::from_secs(wait));
+        }
+        let resp = ureq::post(DISPENSER)
+            .set("User-Agent", DISPENSER_USER_AGENT)
+            .set("Content-Type", "application/json")
+            .timeout(Duration::from_secs(30))
+            .send_string(&device_properties_json());
+        match resp {
+            Ok(resp) => {
+                let v: serde_json::Value = serde_json::from_reader(resp.into_reader())?;
+                let field = |k: &str| {
+                    v.get(k).and_then(|x| x.as_str()).filter(|s| !s.is_empty()).map(str::to_string)
+                };
+                return match (field("email"), field("authToken")) {
+                    (Some(email), Some(token)) => Ok((email, token)),
+                    _ => Err("anonymous token service returned no login".into()),
+                };
+            }
+            // Rate limited or temporarily down: worth another try.
+            Err(ureq::Error::Status(code, _)) if code == 429 || code >= 500 => {
+                log::debug!("token service answered {code} (attempt {})", attempt + 1);
+                last = format!("anonymous token service is busy (HTTP {code})").into();
+            }
+            Err(e) => return Err(format!("anonymous token service: {e}").into()),
+        }
+    }
+    Err(last)
+}
+
+/// Where the last working anonymous login is kept, so that most starts do
+/// not need the token service at all.
+fn login_cache() -> PathBuf {
+    paths::data_dir().join("play_login.json")
+}
+
+fn cached_login() -> Option<(String, String)> {
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(login_cache()).ok()?).ok()?;
+    Some((v.get("email")?.as_str()?.to_string(), v.get("token")?.as_str()?.to_string()))
+}
+
+fn save_login(email: &str, token: &str) {
+    use std::os::unix::fs::OpenOptionsExt;
+    let json = serde_json::json!({ "email": email, "token": token }).to_string();
+    let written = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(login_cache())
+        .and_then(|mut f| {
+            // `mode` only applies to a newly created file.
+            f.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+            f.write_all(json.as_bytes())
+        });
+    if let Err(e) = written {
+        log::debug!("could not cache the Google Play login: {e}");
     }
 }
 
@@ -67,15 +117,15 @@ fn runtime() -> Result<tokio::runtime::Runtime> {
     Ok(tokio::runtime::Builder::new_current_thread().enable_all().build()?)
 }
 
-/// Ask Google Play for the newest release.
-pub fn latest() -> Result<Release> {
-    let (email, token) = anonymous_login()?;
+/// Log in to Google Play with the given anonymous account and look up
+/// the newest release.
+fn query(email: &str, token: &str) -> Result<Release> {
     // gpapi reads custom device profiles from a file.
     let profile = paths::cache_dir().join("play_device.properties");
     fs::create_dir_all(paths::cache_dir())?;
     fs::write(&profile, DEVICE_PROPERTIES)?;
     let profile = profile.to_string_lossy().into_owned();
-    let mut api = Gpapi::from_device_properties_file("default", email.as_str(), profile.as_str());
+    let mut api = Gpapi::from_device_properties_file("default", email, profile.as_str());
     api.set_auth_token(token);
     runtime()?.block_on(async {
         if let Err(e) = api.login().await {
@@ -102,6 +152,27 @@ pub fn latest() -> Result<Release> {
             api,
         })
     })
+}
+
+/// Ask Google Play for the newest release.
+///
+/// The anonymous login from the last successful check is reused while
+/// Google still accepts it; the token service is only contacted when there
+/// is none or it has expired. That keeps us well clear of its rate limits.
+pub fn latest() -> Result<Release> {
+    if let Some((email, token)) = cached_login() {
+        match query(&email, &token) {
+            Ok(release) => {
+                log::debug!("reused the cached Google Play login");
+                return Ok(release);
+            }
+            Err(e) => log::debug!("cached Google Play login no longer works: {e}"),
+        }
+    }
+    let (email, token) = request_anonymous_login()?;
+    let release = query(&email, &token)?;
+    save_login(&email, &token);
+    Ok(release)
 }
 
 /// Download one file from Google's CDN, printing progress.

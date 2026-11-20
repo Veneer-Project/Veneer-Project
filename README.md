@@ -63,7 +63,9 @@ On every start, `lucid run` checks Google Play for the current Roblox release
 and downloads it if the game is missing or out of date (`--no-update` or
 `LUCID_NO_UPDATE=1` skips this). Google Play needs a signed-in account, so
 lucid asks the Aurora Store project's public token service for an anonymous
-one, then downloads straight from Google. If that fails, lucid prints a
+one, then downloads straight from Google. The login is kept and reused on
+later starts, so the token service is only contacted when it has expired (and
+is retried a few times if it is busy). If that fails, lucid prints a
 warning and starts the version already installed; if nothing is installed it
 stops and tells you to install manually.
 
@@ -78,6 +80,7 @@ Where things live:
 | `~/.local/share/lucid/files/` | The app's private files (Android `filesDir`) |
 | `~/.local/share/lucid/prefs/` | Android `SharedPreferences`, one JSON file each |
 | `~/.local/share/lucid/cookies` | The login session (mode 0600) — treat as a password |
+| `~/.local/share/lucid/play_login.json` | The anonymous Google Play login from the last update check, reused until it expires |
 | `~/.local/share/lucid/logs/latest.log` | Debug log of the last run, overwritten each start |
 | `~/.cache/lucid/` | The app's cache directory |
 | `~/.config/lucid/fflags.json` | Optional fast-flag overrides, e.g. `{"DFIntTaskSchedulerTargetFps": 144}` |
