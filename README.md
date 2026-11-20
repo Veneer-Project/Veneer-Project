@@ -33,12 +33,11 @@ Working (confirmed by use):
 - Discord Rich Presence: "In the menu", or the experience's name and icon
 - Screens that are web pages on Android (private servers and similar) open
   in an embedded browser window that shares the app's login
+- Starting a game from an embedded web page (for example joining a private
+  server)
 
 Written but not confirmed:
 
-- Starting a game from an embedded web page (for example joining a private
-  server): links are offered to the engine and the page's JavaScript bridge
-  is answered, but no join has been tested yet
 - X11 (only Wayland has been run; text overlay and clipboard are Wayland-only)
 
 Not implemented:
