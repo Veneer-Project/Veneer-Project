@@ -102,7 +102,17 @@ Where things live:
 | `~/.local/share/lucid/play_login.json` | The anonymous Google Play login from the last update check, reused until it expires |
 | `~/.local/share/lucid/logs/latest.log` | Debug log of the last run, overwritten each start |
 | `~/.cache/lucid/` | The app's cache directory |
-| `~/.config/lucid/fflags.json` | Optional fast-flag overrides, e.g. `{"DFIntTaskSchedulerTargetFps": 144}` |
+| `~/.config/lucid/fflags.json` | Optional fast-flag overrides, e.g. `{"DFIntTaskSchedulerTargetFps": 144}` (not created by lucid, see below) |
+
+lucid only reads `~/.config/lucid/`; it never creates it, so the directory
+does not exist until you make it. To override fast flags:
+
+```sh
+mkdir -p ~/.config/lucid
+echo '{"DFIntTaskSchedulerTargetFps": 144}' > ~/.config/lucid/fflags.json
+```
+
+The next start logs `applying N fast flag overrides from …`.
 
 Environment variables:
 
