@@ -35,14 +35,15 @@ Working (confirmed by use):
   in an embedded browser window that shares the app's login
 - Starting a game from an embedded web page (for example joining a private
   server)
+- "Lucid" window title, icon and app menu entry (`lucid desktop-entry`) on
+  GNOME (Wayland)
 
 Written but not confirmed:
 
 - X11 (only Wayland has been run; text overlay and clipboard are Wayland-only)
-- The window icon and app menu entry (`lucid desktop-entry`): checked that the
-  launcher is valid, but not yet seen on a desktop. The window's own icon
-  (X11, and `xdg-toplevel-icon` on KDE Plasma and others) has not been run
-  on a desktop that uses it
+- The window's own icon (X11, and `xdg-toplevel-icon` on KDE Plasma and
+  others): not run on a desktop that uses it; only GNOME (Wayland), which
+  takes the icon from the launcher, has been seen
 
 Not implemented:
 
