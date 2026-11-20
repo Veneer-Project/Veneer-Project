@@ -8,7 +8,7 @@ use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, DeviceId, ElementState, WindowEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 // `with_name` is shared by the Wayland and X11 extensions (same field).
-use winit::platform::wayland::WindowAttributesExtWayland;
+use winit::platform::wayland::{WindowAttributesExtWayland, WindowExtWayland};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::raw_window_handle::{
     HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
@@ -34,6 +34,8 @@ struct App<F: Frontend> {
     window: Option<Arc<Window>>,
     native: Option<&'static NativeWindow>,
     pointer_locked: bool,
+    /// Kept alive with the window (Wayland, when the compositor takes one).
+    wayland_icon: Option<crate::desktop::WaylandIcon>,
 }
 
 fn backend_of(window: &Window) -> Option<Backend> {
@@ -76,10 +78,22 @@ impl<F: Frontend> ApplicationHandler for App<F> {
             event_loop.exit();
             return;
         };
-        // X11 desktops without a matching launcher use the window's own icon;
-        // Wayland has no such thing.
-        if matches!(backend, Backend::Xlib { .. }) {
-            window.set_window_icon(crate::desktop::window_icon());
+        // The window's own icon, where the window system takes one: always on
+        // X11, on Wayland only with xdg-toplevel-icon (KDE Plasma, not GNOME).
+        // Elsewhere the icon comes from the launcher `lucid desktop-entry` installs.
+        match backend {
+            Backend::Xlib { .. } => window.set_window_icon(crate::desktop::window_icon()),
+            Backend::Wayland { display, .. } => match window.xdg_toplevel() {
+                Some(toplevel) => match crate::desktop::set_wayland_icon(display, toplevel.as_ptr()) {
+                    Ok(Some(icon)) => {
+                        log::debug!("window icon set through xdg-toplevel-icon");
+                        self.wayland_icon = Some(icon);
+                    }
+                    Ok(None) => log::debug!("no xdg-toplevel-icon; the icon comes from lucid.desktop"),
+                    Err(e) => log::warn!("cannot set the window icon: {e}"),
+                },
+                None => {}
+            },
         }
         let size = window.inner_size();
         log::info!(
@@ -186,6 +200,7 @@ pub fn run<F: Frontend>(frontend: F) -> Result<(), Box<dyn std::error::Error>> {
         window: None,
         native: None,
         pointer_locked: false,
+        wayland_icon: None,
     };
     event_loop.run_app(&mut app)?;
     Ok(())

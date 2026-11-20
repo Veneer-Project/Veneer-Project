@@ -40,8 +40,9 @@ Written but not confirmed:
 
 - X11 (only Wayland has been run; text overlay and clipboard are Wayland-only)
 - The window icon and app menu entry (`lucid desktop-entry`): checked that the
-  launcher is valid, but not yet seen on a desktop; KDE Plasma, Budgie and
-  X11 are written from their documented behaviour only
+  launcher is valid, but not yet seen on a desktop. The window's own icon
+  (X11, and `xdg-toplevel-icon` on KDE Plasma and others) has not been run
+  on a desktop that uses it
 
 Not implemented:
 
@@ -97,15 +98,21 @@ the repository icon) into `~/.local/share/icons/hicolor/`. Run it again if
 the binary moves, for example when switching from the debug to the release
 build.
 
-It is a separate command because on Wayland (GNOME, KDE Plasma, Budgie
-10.10+) a window cannot carry its own icon: the desktop matches the window's
-app ID, `lucid`, to `lucid.desktop` and shows that launcher's icon. Without
-the launcher the window has a generic icon. On X11 (GNOME on Xorg, Budgie 10,
-Xfce) the window carries its own icon as well, so it shows even without the
-launcher. Most desktops pick up the change right away; lucid also refreshes
-the GTK icon cache if you have one and KDE's launcher cache
-(`kbuildsycoca6`/`kbuildsycoca5`). If the icon still does not show, log out
-and back in.
+Whether the window needs it depends on the desktop:
+
+- GNOME on Wayland: a window cannot carry its own icon there. GNOME matches
+  the window's app ID, `lucid`, to `lucid.desktop` and shows that launcher's
+  icon; without the launcher the window has a generic icon.
+- Wayland desktops with the `xdg-toplevel-icon` protocol (KDE Plasma 6.1+
+  and some others): the window sends its own icon, so it shows without the
+  launcher. The launcher still adds Lucid to the app menu.
+- X11 (GNOME on Xorg, Budgie 10, Xfce and others): the window carries its own
+  icon too.
+
+After `lucid desktop-entry`, most desktops pick up the change right away;
+lucid also refreshes the GTK icon cache if you have one and KDE's launcher
+cache (`kbuildsycoca6`/`kbuildsycoca5`). If the icon still does not show, log
+out and back in.
 
 On every start, `lucid run` checks Google Play for the current Roblox release
 and downloads it if the game is missing or out of date (`--no-update` or

@@ -1226,6 +1226,7 @@ dependencies = [
  "ureq",
  "wayland-backend",
  "wayland-client",
+ "wayland-protocols",
  "winit",
  "zip",
 ]

@@ -4,13 +4,15 @@
 //! - Wayland (GNOME, KDE Plasma, Budgie 10.10+ and others): a window cannot
 //!   carry its own icon. The compositor matches the window's app ID to a
 //!   launcher named `<app id>.desktop` and shows that launcher's `Icon=`.
+//!   Compositors with the `xdg-toplevel-icon-v1` protocol (KDE Plasma 6.1+
+//!   and some others; not GNOME) also accept an icon from the window itself.
 //! - X11 (GNOME on Xorg, Budgie 10, Xfce, ...): the window's `WM_CLASS` is
 //!   matched to a launcher's `StartupWMClass=`; when no launcher matches,
 //!   the icon stored on the window itself (`_NET_WM_ICON`) is used.
 //!
-//! So every window gets the app ID / `WM_CLASS` [`APP_ID`] and, on X11, its
-//! own icon; `lucid desktop-entry` installs the launcher and the icon theme
-//! entries that the Wayland route needs.
+//! So every window gets the app ID / `WM_CLASS` [`APP_ID`] and, where the
+//! window system allows, its own icon; `lucid desktop-entry` installs the
+//! launcher and the icon theme entries for the rest (GNOME on Wayland).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -37,17 +39,135 @@ const ICONS: &[(u32, &[u8])] = &[
 ];
 const ICON_SVG: &[u8] = include_bytes!("../../assets/logo.svg");
 
-/// The icon stored on the window itself (only used on X11).
-pub fn window_icon() -> Option<winit::window::Icon> {
-    let (_, png) = ICONS.iter().find(|(size, _)| *size == 128)?;
-    let mut reader = png::Decoder::new(io::Cursor::new(*png)).read_info().ok()?;
+/// One embedded icon as 8-bit RGBA (straight alpha): `(width, height, pixels)`.
+fn decode(png: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    let mut reader = png::Decoder::new(io::Cursor::new(png)).read_info().ok()?;
     let mut rgba = vec![0; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut rgba).ok()?;
     if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
         return None;
     }
     rgba.truncate(info.buffer_size());
-    winit::window::Icon::from_rgba(rgba, info.width, info.height).ok()
+    Some((info.width, info.height, rgba))
+}
+
+/// The icon stored on the window itself on X11.
+pub fn window_icon() -> Option<winit::window::Icon> {
+    let (_, png) = ICONS.iter().find(|(size, _)| *size == 128)?;
+    let (w, h, rgba) = decode(png)?;
+    winit::window::Icon::from_rgba(rgba, w, h).ok()
+}
+
+pub use wayland::{Icon as WaylandIcon, set as set_wayland_icon};
+
+/// The window's own icon on Wayland, through `xdg-toplevel-icon-v1`.
+mod wayland {
+    use std::ffi::c_void;
+    use std::os::fd::{AsFd, FromRawFd, OwnedFd};
+    use std::os::unix::fs::FileExt;
+
+    use wayland_client::backend::{Backend, ObjectId};
+    use wayland_client::globals::{GlobalListContents, registry_queue_init};
+    use wayland_client::protocol::{wl_buffer, wl_registry, wl_shm, wl_shm_pool};
+    use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, delegate_noop};
+    use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
+    use wayland_protocols::xdg::toplevel_icon::v1::client::{
+        xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1, xdg_toplevel_icon_v1::XdgToplevelIconV1,
+    };
+
+    use super::{APP_ID, ICONS, decode};
+
+    pub struct State;
+
+    impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
+        fn event(
+            _: &mut Self,
+            _: &wl_registry::WlRegistry,
+            _: wl_registry::Event,
+            _: &GlobalListContents,
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+
+    delegate_noop!(State: ignore wl_shm::WlShm);
+    delegate_noop!(State: wl_shm_pool::WlShmPool);
+    delegate_noop!(State: ignore wl_buffer::WlBuffer);
+    // Preferred sizes; every size up to 256 is offered anyway.
+    delegate_noop!(State: ignore XdgToplevelIconManagerV1);
+    delegate_noop!(State: XdgToplevelIconV1);
+
+    /// Keep for as long as the window lives: the compositor may read the
+    /// icon's buffers until the icon is replaced.
+    pub struct Icon {
+        _queue: EventQueue<State>,
+        _icon: XdgToplevelIconV1,
+        _buffers: Vec<wl_buffer::WlBuffer>,
+    }
+
+    /// Give the toplevel (winit's `xdg_toplevel` proxy on `display`) Lucid's
+    /// icon, by theme name and as pixels. `None` if the compositor does not
+    /// support it.
+    pub fn set(display: usize, toplevel: *mut c_void) -> Result<Option<Icon>, Box<dyn std::error::Error>> {
+        // Share the window's connection, with our own event queue (as the text overlay does).
+        let conn = Connection::from_backend(unsafe { Backend::from_foreign_display(display as *mut _) });
+        let (globals, queue) = registry_queue_init::<State>(&conn)?;
+        let qh = queue.handle();
+        let Ok(manager) = globals.bind::<XdgToplevelIconManagerV1, _, _>(&qh, 1..=1, ()) else {
+            return Ok(None);
+        };
+        let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ())?;
+        let toplevel_id = unsafe { ObjectId::from_ptr(XdgToplevel::interface(), toplevel.cast()) }?;
+        let toplevel = XdgToplevel::from_id(&conn, toplevel_id)?;
+
+        // Every size up to 256 px, as premultiplied ARGB8888 (little endian:
+        // B, G, R, A), one after another in a single shared-memory file.
+        let mut images = Vec::new();
+        for (size, png) in ICONS.iter().filter(|(size, _)| *size <= 256) {
+            let (w, h, rgba) = decode(png).ok_or("bad embedded icon")?;
+            if (w, h) != (*size, *size) {
+                return Err("embedded icon has the wrong size".into());
+            }
+            let mut argb = Vec::with_capacity(rgba.len());
+            for px in rgba.chunks_exact(4) {
+                let a = px[3] as u32;
+                let pre = |c: u8| ((c as u32 * a + 127) / 255) as u8;
+                argb.extend_from_slice(&[pre(px[2]), pre(px[1]), pre(px[0]), px[3]]);
+            }
+            images.push((*size, argb));
+        }
+        let len: usize = images.iter().map(|(_, px)| px.len()).sum();
+        let fd = unsafe { libc::memfd_create(c"lucid-icon".as_ptr(), libc::MFD_CLOEXEC) };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        let file = std::fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) });
+        file.set_len(len as u64)?;
+        let pool = shm.create_pool(file.as_fd(), len as i32, &qh, ());
+
+        let icon = manager.create_icon(&qh, ());
+        // A theme icon named `lucid` (from `lucid desktop-entry`) may be
+        // preferred by the compositor; the pixels are the fallback.
+        icon.set_name(APP_ID.to_string());
+        let mut buffers = Vec::new();
+        let mut offset = 0;
+        for (size, argb) in &images {
+            file.write_all_at(argb, offset as u64)?;
+            let s = *size as i32;
+            let buffer = pool.create_buffer(offset as i32, s, s, s * 4, wl_shm::Format::Argb8888, &qh, ());
+            icon.add_buffer(&buffer, 1);
+            buffers.push(buffer);
+            offset += argb.len();
+        }
+        // Applied with the window's next commit (the game commits every frame).
+        manager.set_icon(&toplevel, Some(&icon));
+        // Neither destroys the icon or its buffers.
+        pool.destroy();
+        manager.destroy();
+        conn.flush()?;
+        Ok(Some(Icon { _queue: queue, _icon: icon, _buffers: buffers }))
+    }
 }
 
 fn launcher_path() -> PathBuf {

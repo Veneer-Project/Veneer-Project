@@ -20,6 +20,8 @@ serde_json = "1.0.154"
 wayland-client = "0.31"
 ab_glyph = "0.2"
 wayland-backend = { version = "0.3", features = ["client_system"] }
+# xdg-toplevel-icon (the window's own icon on Wayland) is a staging protocol.
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 smithay-clipboard = "0.7.3"
 gpapi = "6.1.0"
 # Decodes the window icon for X11.
