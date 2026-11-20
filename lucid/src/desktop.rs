@@ -1,5 +1,4 @@
-//! Veneer's name and icon on the desktop. What people see is called Veneer;
-//! the app ID, launcher file and icon name keep the codename `lucid`.
+//! Veneer's name and icon on the desktop.
 //!
 //! How a desktop finds a window's icon:
 //! - Wayland (GNOME, KDE Plasma, Budgie 10.10+ and others): a window cannot
@@ -21,11 +20,13 @@ use std::process::{Command, Stdio};
 
 use crate::paths;
 
-/// The title of lucid's windows.
+/// The title of Veneer's windows.
 pub const NAME: &str = "Veneer";
-/// Wayland app ID and X11 `WM_CLASS`; also the launcher's and the icon's file
-/// name. Never shown to people, so it keeps the codename.
-pub const APP_ID: &str = "lucid";
+/// Wayland app ID and X11 `WM_CLASS`; also the launcher's and the icon's file name.
+pub const APP_ID: &str = "veneer";
+/// The app ID before the project was named Veneer; what an older
+/// `desktop-entry` installed under it is cleaned up.
+const OLD_APP_ID: &str = "lucid";
 
 /// The logo (`assets/logo.svg`, the same image as the repository's icon),
 /// rendered at the usual icon theme sizes.
@@ -172,22 +173,62 @@ mod wayland {
     }
 }
 
+fn launcher_path_for(app_id: &str) -> PathBuf {
+    paths::data_home().join("applications").join(format!("{app_id}.desktop"))
+}
+
 fn launcher_path() -> PathBuf {
-    paths::data_home().join("applications").join(format!("{APP_ID}.desktop"))
+    launcher_path_for(APP_ID)
 }
 
 fn hicolor() -> PathBuf {
     paths::data_home().join("icons/hicolor")
 }
 
-fn icon_paths() -> Vec<PathBuf> {
+/// One path per [`ICONS`] entry, then the SVG.
+fn icon_paths_for(app_id: &str) -> Vec<PathBuf> {
     let root = hicolor();
     let mut v: Vec<PathBuf> = ICONS
         .iter()
-        .map(|(s, _)| root.join(format!("{s}x{s}/apps/{APP_ID}.png")))
+        .map(|(s, _)| root.join(format!("{s}x{s}/apps/{app_id}.png")))
         .collect();
-    v.push(root.join(format!("scalable/apps/{APP_ID}.svg")));
+    v.push(root.join(format!("scalable/apps/{app_id}.svg")));
     v
+}
+
+fn icon_paths() -> Vec<PathBuf> {
+    icon_paths_for(APP_ID)
+}
+
+/// Remove the launcher and icons an older version installed under the old
+/// app ID, but only files that are certainly ours: the launcher by its
+/// contents, each icon by being byte-identical to ours.
+fn remove_old() -> io::Result<usize> {
+    let mut removed = 0;
+    let mut remove = |path: &Path| -> io::Result<()> {
+        match std::fs::remove_file(path) {
+            Ok(()) => removed += 1,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        Ok(())
+    };
+    let launcher = launcher_path_for(OLD_APP_ID);
+    if let Ok(text) = std::fs::read_to_string(&launcher) {
+        let ours = text.contains("\nIcon=lucid\n")
+            && text.contains("\nStartupWMClass=lucid\n")
+            && text.contains("Comment=Run the Android build of Roblox on Linux\n");
+        if ours {
+            remove(&launcher)?;
+        }
+    }
+    let ours = ICONS.iter().map(|(_, png)| *png).chain(std::iter::once(ICON_SVG));
+    for (path, bytes) in icon_paths_for(OLD_APP_ID).iter().zip(ours) {
+        if std::fs::read(path).is_ok_and(|b| b == bytes) {
+            remove(path)?;
+        }
+    }
+    Ok(removed)
 }
 
 /// One argument of a launcher's `Exec=` line, escaped as the Desktop Entry
@@ -278,13 +319,14 @@ pub fn install() -> io::Result<(PathBuf, PathBuf)> {
     }
     write(icon_paths().last().unwrap(), ICON_SVG)?;
     write(&launcher_path, launcher(&exe)?.as_bytes())?;
+    remove_old()?;
     refresh();
     Ok((launcher_path, exe))
 }
 
 /// Remove what [`install`] wrote; how many files were removed.
 pub fn remove() -> io::Result<usize> {
-    let mut removed = 0;
+    let mut removed = remove_old()?;
     for path in std::iter::once(launcher_path()).chain(icon_paths()) {
         match std::fs::remove_file(&path) {
             Ok(()) => removed += 1,

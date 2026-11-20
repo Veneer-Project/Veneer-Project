@@ -11,11 +11,14 @@ libc, the NDK system libraries, and a fake Java VM in which the app's Java side
 is reimplemented in Rust.
 
 **Name and codename.** The project is called Veneer; its codename is Lucid.
-Everything you see uses the name: the `veneer` command, the window title, the
-app menu entry and the Discord presence. The internals keep the codename: the
-crates (`lucid`, `lucid-linker`, ...), the data folders (`~/.local/share/lucid`
-and the others below), the `LUCID_*` environment variables, the app ID
-`lucid` and the launcher file `lucid.desktop`.
+The name is used for everything outside the code: the `veneer` command, the
+window title, the app menu entry, the Discord presence and the folders on
+disk (`~/.local/share/veneer` and the others below). The codename stays
+inside: the crates (`lucid`, `lucid-linker`, ...), the `LUCID_*` environment
+variables and the device identity reported to Roblox. Folders from before
+the rename (`~/.local/share/veneer`, `~/.cache/veneer`, `~/.config/veneer`) are
+moved to the new names on the first start, so the installed game and the
+login carry over.
 
 ## Status
 
@@ -98,7 +101,7 @@ the app menu, run once (with the binary you want the menu to start):
 ./target/release/veneer desktop-entry --remove  # undo
 ```
 
-This writes `~/.local/share/applications/lucid.desktop`, which starts
+This writes `~/.local/share/applications/veneer.desktop`, which starts
 `veneer run` from the binary's current path, and the logo (the same image as
 the repository icon) into `~/.local/share/icons/hicolor/`. Run it again if
 the binary moves, for example when switching from the debug to the release
@@ -107,7 +110,7 @@ build.
 Whether the window needs it depends on the desktop:
 
 - GNOME on Wayland: a window cannot carry its own icon there. GNOME matches
-  the window's app ID, `lucid`, to `lucid.desktop` and shows that launcher's
+  the window's app ID, `veneer`, to `veneer.desktop` and shows that launcher's
   icon; without the launcher the window has a generic icon.
 - Wayland desktops with the `xdg-toplevel-icon` protocol (KDE Plasma 6.1+
   and some others): the window sends its own icon, so it shows without the
@@ -137,22 +140,22 @@ Where things live:
 
 | Path | Contents |
 |---|---|
-| `~/.local/share/lucid/app/` | Libraries and assets unpacked from the APK, `version` |
-| `~/.local/share/lucid/files/` | The app's private files (Android `filesDir`) |
-| `~/.local/share/lucid/prefs/` | Android `SharedPreferences`, one JSON file each |
-| `~/.local/share/lucid/cookies` | The login session (mode 0600) — treat as a password |
-| `~/.local/share/lucid/play_login.json` | The anonymous Google Play login from the last update check, reused until it expires |
-| `~/.local/share/lucid/logs/latest.log` | Debug log of the last run, overwritten each start |
-| `~/.cache/lucid/` | The app's cache directory |
-| `~/.local/share/applications/lucid.desktop`, `~/.local/share/icons/hicolor/*/apps/lucid.*` | Launcher and icons, only if you ran `veneer desktop-entry` |
-| `~/.config/lucid/fflags.json` | Optional fast-flag overrides, e.g. `{"DFIntTaskSchedulerTargetFps": 144}` (not created by Veneer, see below) |
+| `~/.local/share/veneer/app/` | Libraries and assets unpacked from the APK, `version` |
+| `~/.local/share/veneer/files/` | The app's private files (Android `filesDir`) |
+| `~/.local/share/veneer/prefs/` | Android `SharedPreferences`, one JSON file each |
+| `~/.local/share/veneer/cookies` | The login session (mode 0600) — treat as a password |
+| `~/.local/share/veneer/play_login.json` | The anonymous Google Play login from the last update check, reused until it expires |
+| `~/.local/share/veneer/logs/latest.log` | Debug log of the last run, overwritten each start |
+| `~/.cache/veneer/` | The app's cache directory |
+| `~/.local/share/applications/veneer.desktop`, `~/.local/share/icons/hicolor/*/apps/veneer.*` | Launcher and icons, only if you ran `veneer desktop-entry` |
+| `~/.config/veneer/fflags.json` | Optional fast-flag overrides, e.g. `{"DFIntTaskSchedulerTargetFps": 144}` (not created by Veneer, see below) |
 
-Veneer only reads `~/.config/lucid/`; it never creates it, so the directory
+Veneer only reads `~/.config/veneer/`; it never creates it, so the directory
 does not exist until you make it. To override fast flags:
 
 ```sh
-mkdir -p ~/.config/lucid
-echo '{"DFIntTaskSchedulerTargetFps": 144}' > ~/.config/lucid/fflags.json
+mkdir -p ~/.config/veneer
+echo '{"DFIntTaskSchedulerTargetFps": 144}' > ~/.config/veneer/fflags.json
 ```
 
 The next start logs `applying N fast flag overrides from …`.
@@ -244,7 +247,7 @@ Things learned the hard way; read these before debugging.
 
 Debugging tools:
 
-- `~/.local/share/lucid/logs/latest.log` always has debug-level output,
+- `~/.local/share/veneer/logs/latest.log` always has debug-level output,
   including the engine's own log lines (`android: [Roblox] ...`).
 - `grep UNIMPLEMENTED` in that log lists Java methods the engine wanted.
 - A crash prints the faulting address as `libroblox.so+0xOFFSET` plus guest

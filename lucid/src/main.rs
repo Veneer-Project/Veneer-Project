@@ -33,6 +33,19 @@ struct Logger {
     file: Option<std::sync::Mutex<std::fs::File>>,
 }
 
+/// A log line's origin without the codename crate prefix, which people
+/// would otherwise see: `lucid::update` → `update`, `lucid_linker::stubs`
+/// → `linker::stubs`, the binary's own root module → `veneer`.
+fn short_target(target: &str) -> &str {
+    if target == "lucid" {
+        return "veneer";
+    }
+    target
+        .strip_prefix("lucid::")
+        .or_else(|| target.strip_prefix("lucid_"))
+        .unwrap_or(target)
+}
+
 impl log::Log for Logger {
     fn enabled(&self, m: &log::Metadata) -> bool {
         m.level() <= self.level || (self.file.is_some() && m.level() <= log::Level::Debug)
@@ -44,7 +57,7 @@ impl log::Log for Logger {
         }
         if let (Some(f), true) = (&self.file, r.level() <= log::Level::Debug) {
             use std::io::Write;
-            let _ = writeln!(f.lock().unwrap(), "{} {}: {}", r.level(), r.target(), r.args());
+            let _ = writeln!(f.lock().unwrap(), "{} {}: {}", r.level(), short_target(r.target()), r.args());
         }
         if r.level() <= self.level {
             let tag = match r.level() {
@@ -54,7 +67,7 @@ impl log::Log for Logger {
                 log::Level::Debug => "D",
                 log::Level::Trace => "T",
             };
-            eprintln!("{tag} {}: {}", r.target(), r.args());
+            eprintln!("{tag} {}: {}", short_target(r.target()), r.args());
         }
     }
     fn flush(&self) {}
@@ -164,6 +177,8 @@ fn main() -> ExitCode {
     if std::env::args().nth(1).as_deref() == Some("webview") {
         return ExitCode::from(webview_helper::run() as u8);
     }
+    // Before the log file creates the new data folder.
+    paths::migrate();
     init_logging();
     crash::install();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -211,5 +226,18 @@ fn main() -> ExitCode {
             }
         }
         _ => usage(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn short_target_hides_the_codename() {
+        use super::short_target;
+        assert_eq!(short_target("lucid::update"), "update");
+        assert_eq!(short_target("lucid_linker::stubs"), "linker::stubs");
+        assert_eq!(short_target("lucid_jni"), "jni");
+        assert_eq!(short_target("lucid"), "veneer");
+        assert_eq!(short_target("android"), "android");
     }
 }
