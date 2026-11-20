@@ -52,7 +52,7 @@ fn activity(state: &State) -> Activity {
             details: Some("In the menu".into()),
             start: Some(now()),
             large_image: Some(LOGO.into()),
-            large_text: Some("Roblox on Linux, via Lucid Project".into()),
+            large_text: Some("Roblox on Linux, via Veneer".into()),
             ..Activity::default()
         },
         State::InGame { place_id } => {
@@ -70,7 +70,7 @@ fn activity(state: &State) -> Activity {
                 large_image: Some(large),
                 large_text: name,
                 small_image: small,
-                small_text: Some("Lucid Project".into()),
+                small_text: Some("Veneer".into()),
                 buttons: vec![(
                     "View experience".into(),
                     format!("https://www.roblox.com/games/{place_id}"),

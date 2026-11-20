@@ -2,7 +2,7 @@
 //!
 //! On Android several screens (private servers, some settings and purchase
 //! pages, help) are web pages shown in an in-app WebView that shares the
-//! app's login. Here the page is shown by a helper process (`lucid webview`,
+//! app's login. Here the page is shown by a helper process (`veneer webview`,
 //! see `webview_helper.rs`); this module is the app side of it: it hands
 //! over the session cookies, offers every link the user clicks to the
 //! engine first (so "join this server" starts the game in lucid), and

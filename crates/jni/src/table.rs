@@ -470,7 +470,7 @@ unsafe extern "C" fn exception_check(_e: Env) -> u8 {
     pending_exception().is_some() as u8
 }
 unsafe extern "C" fn fatal_error(_e: Env, msg: *const c_char) -> ! {
-    eprintln!("lucid: JNI FatalError: {}", cstr(msg));
+    eprintln!("veneer: JNI FatalError: {}", cstr(msg));
     std::process::abort();
 }
 

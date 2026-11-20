@@ -33,7 +33,7 @@ extern "C" fn unresolved_called(name: *const c_char) -> usize {
         log::error!("guest called unresolved symbol `{name}` (returning 0)");
         return 0;
     }
-    eprintln!("lucid: guest called unresolved symbol `{name}`; aborting");
+    eprintln!("veneer: guest called unresolved symbol `{name}`; aborting");
     std::process::abort();
 }
 

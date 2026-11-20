@@ -75,7 +75,7 @@ unsafe extern "C" fn log_assert(
         unsafe { format(fmt, ap) }
     };
     emit(7, tag, &text);
-    eprintln!("lucid: guest __android_log_assert: {text}");
+    eprintln!("veneer: guest __android_log_assert: {text}");
     std::process::abort();
 }
 

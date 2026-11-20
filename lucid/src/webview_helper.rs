@@ -1,4 +1,4 @@
-//! The embedded browser, run as a separate process (`lucid webview`).
+//! The embedded browser, run as a separate process (`veneer webview`).
 //!
 //! It is a small GTK window with a WebKitGTK view. GTK and WebKit are
 //! loaded with `dlopen`, so they are neither a build dependency nor loaded
@@ -322,7 +322,7 @@ pub fn run() -> i32 {
 
     unsafe {
         // Same app ID / WM_CLASS as the game window, so the desktop shows
-        // Lucid's icon and groups the two (must happen before gtk_init).
+        // Veneer's icon and groups the two (must happen before gtk_init).
         // GTK would otherwise derive it from the program name, capitalised.
         let app_id = CString::new(crate::desktop::APP_ID).unwrap();
         if let Some(p) = optional(&glib, c"g_set_prgname") {
@@ -444,7 +444,7 @@ pub fn run() -> i32 {
             set_title(window, t.as_ptr());
         }
         // On X11 GTK puts the theme icon on the window (installed by
-        // `lucid desktop-entry`); on Wayland the launcher provides it.
+        // `veneer desktop-entry`); on Wayland the launcher provides it.
         let set_icon_name: unsafe extern "C" fn(Ptr, *const c_char) = gtk.get(c"gtk_window_set_icon_name");
         set_icon_name(window, app_id.as_ptr());
         set_default_size(window, 1100, 720);

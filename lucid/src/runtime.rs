@@ -130,7 +130,7 @@ impl app::Frontend for Engine {
 pub fn run(probe: bool, join_place: Option<i64>) -> Result<(), Box<dyn Error>> {
     let device = Device::detect();
     if device.app_version.is_empty() {
-        return Err("unknown app version; run `lucid install` again".into());
+        return Err("unknown app version; run `veneer install` again".into());
     }
     log::info!("Roblox {}", device.app_version);
     java::install(&device);

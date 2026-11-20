@@ -1,4 +1,5 @@
-//! Lucid's name and icon on the desktop.
+//! Veneer's name and icon on the desktop. What people see is called Veneer;
+//! the app ID, launcher file and icon name keep the codename `lucid`.
 //!
 //! How a desktop finds a window's icon:
 //! - Wayland (GNOME, KDE Plasma, Budgie 10.10+ and others): a window cannot
@@ -11,7 +12,7 @@
 //!   the icon stored on the window itself (`_NET_WM_ICON`) is used.
 //!
 //! So every window gets the app ID / `WM_CLASS` [`APP_ID`] and, where the
-//! window system allows, its own icon; `lucid desktop-entry` installs the
+//! window system allows, its own icon; `veneer desktop-entry` installs the
 //! launcher and the icon theme entries for the rest (GNOME on Wayland).
 
 use std::io;
@@ -21,8 +22,9 @@ use std::process::{Command, Stdio};
 use crate::paths;
 
 /// The title of lucid's windows.
-pub const NAME: &str = "Lucid";
-/// Wayland app ID and X11 `WM_CLASS`; also the launcher's and the icon's file name.
+pub const NAME: &str = "Veneer";
+/// Wayland app ID and X11 `WM_CLASS`; also the launcher's and the icon's file
+/// name. Never shown to people, so it keeps the codename.
 pub const APP_ID: &str = "lucid";
 
 /// The logo (`assets/logo.svg`, the same image as the repository's icon),
@@ -106,7 +108,7 @@ mod wayland {
         _buffers: Vec<wl_buffer::WlBuffer>,
     }
 
-    /// Give the toplevel (winit's `xdg_toplevel` proxy on `display`) Lucid's
+    /// Give the toplevel (winit's `xdg_toplevel` proxy on `display`) Veneer's
     /// icon, by theme name and as pixels. `None` if the compositor does not
     /// support it.
     pub fn set(display: usize, toplevel: *mut c_void) -> Result<Option<Icon>, Box<dyn std::error::Error>> {
@@ -147,7 +149,7 @@ mod wayland {
         let pool = shm.create_pool(file.as_fd(), len as i32, &qh, ());
 
         let icon = manager.create_icon(&qh, ());
-        // A theme icon named `lucid` (from `lucid desktop-entry`) may be
+        // A theme icon named `lucid` (from `veneer desktop-entry`) may be
         // preferred by the compositor; the pixels are the fallback.
         icon.set_name(APP_ID.to_string());
         let mut buffers = Vec::new();

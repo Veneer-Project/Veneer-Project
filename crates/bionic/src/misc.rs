@@ -158,7 +158,7 @@ unsafe extern "C" fn mallinfo() -> Mallinfo {
 unsafe extern "C" fn assert_fail(file: *const c_char, line: c_int, expr: *const c_char) -> ! {
     let file = unsafe { CStr::from_ptr(file) }.to_string_lossy();
     let expr = unsafe { CStr::from_ptr(expr) }.to_string_lossy();
-    eprintln!("lucid: guest assertion failed: {file}:{line}: {expr}");
+    eprintln!("veneer: guest assertion failed: {file}:{line}: {expr}");
     std::process::abort();
 }
 
@@ -171,7 +171,7 @@ unsafe extern "C" fn assert2_fail(
     let file = unsafe { CStr::from_ptr(file) }.to_string_lossy();
     let func = unsafe { CStr::from_ptr(func) }.to_string_lossy();
     let expr = unsafe { CStr::from_ptr(expr) }.to_string_lossy();
-    eprintln!("lucid: guest assertion failed: {file}:{line}: {func}: {expr}");
+    eprintln!("veneer: guest assertion failed: {file}:{line}: {func}: {expr}");
     std::process::abort();
 }
 
@@ -183,7 +183,7 @@ unsafe extern "C" fn set_abort_message(msg: *const c_char) {
 }
 
 unsafe extern "C" fn guest_abort() -> ! {
-    eprintln!("lucid: guest called abort()");
+    eprintln!("veneer: guest called abort()");
     unsafe {
         // Make sure the default action runs even if the guest hooked SIGABRT.
         libc::signal(libc::SIGABRT, libc::SIG_DFL);

@@ -1,16 +1,21 @@
-# lucid
+# Veneer
 
 An open-source runtime, written in Rust, that runs the official **Android x86-64
 build of Roblox** on desktop Linux — the same idea as the closed-source
 [Sober](https://sober.vinegarhq.org/), but open.
 
-No Android and no Java are involved. lucid loads Roblox's native library
+No Android and no Java are involved. Veneer loads Roblox's native library
 (`libroblox.so`, taken from the APK) straight into a normal Linux process and
 supplies everything that library expects from Android: a bionic-compatible
 libc, the NDK system libraries, and a fake Java VM in which the app's Java side
 is reimplemented in Rust.
 
-"lucid" is a working name.
+**Name and codename.** The project is called Veneer; its codename is Lucid.
+Everything you see uses the name: the `veneer` command, the window title, the
+app menu entry and the Discord presence. The internals keep the codename: the
+crates (`lucid`, `lucid-linker`, ...), the data folders (`~/.local/share/lucid`
+and the others below), the `LUCID_*` environment variables, the app ID
+`lucid` and the launcher file `lucid.desktop`.
 
 ## Status
 
@@ -35,7 +40,7 @@ Working (confirmed by use):
   in an embedded browser window that shares the app's login
 - Starting a game from an embedded web page (for example joining a private
   server)
-- "Lucid" window title, icon and app menu entry (`lucid desktop-entry`) on
+- Window title, icon and app menu entry (`veneer desktop-entry`) on
   GNOME (Wayland)
 
 Written but not confirmed:
@@ -64,11 +69,11 @@ system browser.
 
 ```sh
 cargo build
-./target/debug/lucid run                        # download/update the game if needed, then start
-./target/debug/lucid update                     # only download/update
-./target/debug/lucid install --from-sober       # manual install; or: install base.apk split_config.x86_64.apk
-./target/debug/lucid run --place 1818           # join a place directly
-./target/debug/lucid probe                      # boot the engine without a window
+./target/debug/veneer run                       # download/update the game if needed, then start
+./target/debug/veneer update                    # only download/update
+./target/debug/veneer install --from-sober      # manual install; or: install base.apk split_config.x86_64.apk
+./target/debug/veneer run --place 1818          # join a place directly
+./target/debug/veneer probe                     # boot the engine without a window
 ```
 
 For an optimized build, use `--release`; the binary is then in
@@ -76,25 +81,25 @@ For an optimized build, use `--release`; the binary is then in
 
 ```sh
 cargo build --release
-./target/release/lucid run                      # download/update the game if needed, then start
-./target/release/lucid update                   # only download/update
-./target/release/lucid install --from-sober     # manual install; or: install base.apk split_config.x86_64.apk
-./target/release/lucid run --place 1818         # join a place directly
-./target/release/lucid probe                    # boot the engine without a window
+./target/release/veneer run                     # download/update the game if needed, then start
+./target/release/veneer update                  # only download/update
+./target/release/veneer install --from-sober    # manual install; or: install base.apk split_config.x86_64.apk
+./target/release/veneer run --place 1818        # join a place directly
+./target/release/veneer probe                   # boot the engine without a window
 ```
 
 ### App menu and icon
 
-The window is titled "Lucid". To give it the Lucid icon and add Lucid to the
-app menu, run once (with the binary you want the menu to start):
+The window is titled "Veneer". To give it the Veneer icon and add Veneer to
+the app menu, run once (with the binary you want the menu to start):
 
 ```sh
-./target/release/lucid desktop-entry            # or ./target/debug/lucid desktop-entry
-./target/release/lucid desktop-entry --remove   # undo
+./target/release/veneer desktop-entry           # or ./target/debug/veneer desktop-entry
+./target/release/veneer desktop-entry --remove  # undo
 ```
 
 This writes `~/.local/share/applications/lucid.desktop`, which starts
-`lucid run` from the binary's current path, and the logo (the same image as
+`veneer run` from the binary's current path, and the logo (the same image as
 the repository icon) into `~/.local/share/icons/hicolor/`. Run it again if
 the binary moves, for example when switching from the debug to the release
 build.
@@ -106,22 +111,22 @@ Whether the window needs it depends on the desktop:
   icon; without the launcher the window has a generic icon.
 - Wayland desktops with the `xdg-toplevel-icon` protocol (KDE Plasma 6.1+
   and some others): the window sends its own icon, so it shows without the
-  launcher. The launcher still adds Lucid to the app menu.
+  launcher. The launcher still adds Veneer to the app menu.
 - X11 (GNOME on Xorg, Budgie 10, Xfce and others): the window carries its own
   icon too.
 
-After `lucid desktop-entry`, most desktops pick up the change right away;
-lucid also refreshes the GTK icon cache if you have one and KDE's launcher
+After `veneer desktop-entry`, most desktops pick up the change right away;
+Veneer also refreshes the GTK icon cache if you have one and KDE's launcher
 cache (`kbuildsycoca6`/`kbuildsycoca5`). If the icon still does not show, log
 out and back in.
 
-On every start, `lucid run` checks Google Play for the current Roblox release
+On every start, `veneer run` checks Google Play for the current Roblox release
 and downloads it if the game is missing or out of date (`--no-update` or
 `LUCID_NO_UPDATE=1` skips this). Google Play needs a signed-in account, so
-lucid asks the Aurora Store project's public token service for an anonymous
+Veneer asks the Aurora Store project's public token service for an anonymous
 one, then downloads straight from Google. The login is kept and reused on
 later starts, so the token service is only contacted when it has expired (and
-is retried a few times if it is busy). If that fails, lucid prints a
+is retried a few times if it is busy). If that fails, Veneer prints a
 warning and starts the version already installed; if nothing is installed it
 stops and tells you to install manually.
 
@@ -139,10 +144,10 @@ Where things live:
 | `~/.local/share/lucid/play_login.json` | The anonymous Google Play login from the last update check, reused until it expires |
 | `~/.local/share/lucid/logs/latest.log` | Debug log of the last run, overwritten each start |
 | `~/.cache/lucid/` | The app's cache directory |
-| `~/.local/share/applications/lucid.desktop`, `~/.local/share/icons/hicolor/*/apps/lucid.*` | Launcher and icons, only if you ran `lucid desktop-entry` |
-| `~/.config/lucid/fflags.json` | Optional fast-flag overrides, e.g. `{"DFIntTaskSchedulerTargetFps": 144}` (not created by lucid, see below) |
+| `~/.local/share/applications/lucid.desktop`, `~/.local/share/icons/hicolor/*/apps/lucid.*` | Launcher and icons, only if you ran `veneer desktop-entry` |
+| `~/.config/lucid/fflags.json` | Optional fast-flag overrides, e.g. `{"DFIntTaskSchedulerTargetFps": 144}` (not created by Veneer, see below) |
 
-lucid only reads `~/.config/lucid/`; it never creates it, so the directory
+Veneer only reads `~/.config/lucid/`; it never creates it, so the directory
 does not exist until you make it. To override fast flags:
 
 ```sh
@@ -178,7 +183,7 @@ crates/jni       A fake JavaVM/JNIEnv with a small object model. "Java" methods
                  anything unregistered logs `UNIMPLEMENTED java method ...` once
                  and returns zero/null.
 crates/discord   Discord IPC client (no dependencies).
-lucid/           The launcher binary:
+lucid/           The launcher (builds the `veneer` binary):
   install.rs     unpack APKs            startup.rs   the Android app's startup sequence
   update.rs      Google Play download and update check
   runtime.rs     load engine, run       java.rs      static callback classes, jcall! macro
@@ -188,7 +193,7 @@ lucid/           The launcher binary:
   cookies.rs     login persistence      presence.rs  Discord presence
   flags.rs       default fast flags     crash.rs     fatal signal reporter
   bus.rs         engine message bus     webview.rs   web pages (app side)
-  webview_helper.rs  the embedded browser process (`lucid webview`, GTK + WebKitGTK)
+  webview_helper.rs  the embedded browser process (`veneer webview`, GTK + WebKitGTK)
   device.rs      device identity        paths.rs     directories
 ```
 
@@ -274,11 +279,13 @@ Debugging tools:
 6. **Discord logo**: the menu presence refers to an art asset named `logo`.
    Upload `assets/logo.png` under that name in the Discord developer portal
    (Rich Presence → Art Assets) for the application, or it shows no image.
+   The presence's title is the application's name, which code cannot set:
+   name the application "Veneer" in the portal.
 7. Local-reference bookkeeping on engine-owned threads is minimal (locals not
    explicitly deleted there are leaked).
 
 ## Legal
 
-lucid contains no Roblox code or assets; you supply the APK. Roblox is a
+Veneer contains no Roblox code or assets; you supply the APK. Roblox is a
 trademark of Roblox Corporation, which is not affiliated with this project.
 Licensed under GPL-3.0-or-later.

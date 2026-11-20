@@ -13,7 +13,7 @@ unsafe extern "C" fn on_fatal(sig: i32, info: *mut libc::siginfo_t, ctx: *mut c_
         )
     };
     let addr = unsafe { (*info).si_addr() } as usize;
-    eprintln!("\nlucid: fatal signal {sig} (fault address {addr:#x})");
+    eprintln!("\nveneer: fatal signal {sig} (fault address {addr:#x})");
     eprintln!("  rip {}", lucid_linker::describe_addr(rip));
     eprintln!("  rsp {rsp:#x} rbp {rbp:#x}");
     if let Ok(maps) = std::fs::read_to_string("/proc/self/maps") {

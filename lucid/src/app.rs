@@ -60,7 +60,7 @@ impl<F: Frontend> ApplicationHandler for App<F> {
             return;
         }
         // The app ID (Wayland) / WM_CLASS (X11) ties the window to the
-        // launcher `lucid desktop-entry` installs, which provides the icon.
+        // launcher `veneer desktop-entry` installs, which provides the icon.
         let attrs = Window::default_attributes()
             .with_title(crate::desktop::NAME)
             .with_name(crate::desktop::APP_ID, crate::desktop::APP_ID)
@@ -68,19 +68,19 @@ impl<F: Frontend> ApplicationHandler for App<F> {
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Arc::new(w),
             Err(e) => {
-                eprintln!("lucid: cannot create a window: {e}");
+                eprintln!("veneer: cannot create a window: {e}");
                 event_loop.exit();
                 return;
             }
         };
         let Some(backend) = backend_of(&window) else {
-            eprintln!("lucid: unsupported window system (need Wayland or X11/Xlib)");
+            eprintln!("veneer: unsupported window system (need Wayland or X11/Xlib)");
             event_loop.exit();
             return;
         };
         // The window's own icon, where the window system takes one: always on
         // X11, on Wayland only with xdg-toplevel-icon (KDE Plasma, not GNOME).
-        // Elsewhere the icon comes from the launcher `lucid desktop-entry` installs.
+        // Elsewhere the icon comes from the launcher `veneer desktop-entry` installs.
         match backend {
             Backend::Xlib { .. } => window.set_window_icon(crate::desktop::window_icon()),
             Backend::Wayland { display, .. } => match window.xdg_toplevel() {

@@ -296,7 +296,7 @@ pub fn ensure_current() -> Result<()> {
                 }
                 None => Err(format!(
                     "could not download Roblox: {e}\n\
-                     You can install it manually with `lucid install <base.apk> <split_config.x86_64.apk>`."
+                     You can install it manually with `veneer install <base.apk> <split_config.x86_64.apk>`."
                 )
                 .into()),
             };
@@ -318,7 +318,7 @@ pub fn ensure_current() -> Result<()> {
             download_and_install(&release).map_err(|e| {
                 format!(
                     "could not download Roblox: {e}\n\
-                     You can install it manually with `lucid install <base.apk> <split_config.x86_64.apk>`."
+                     You can install it manually with `veneer install <base.apk> <split_config.x86_64.apk>`."
                 )
                 .into()
             })

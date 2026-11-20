@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+# The project is Veneer (codename Lucid): the command is `veneer`, while the
+# crates, data folders and app ID keep the codename.
+[[bin]]
+name = "veneer"
+path = "src/main.rs"
+
 [dependencies]
 libc.workspace = true
 log.workspace = true

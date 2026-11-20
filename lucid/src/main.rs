@@ -1,4 +1,4 @@
-//! lucid: run the Android x86-64 build of Roblox on Linux.
+//! Veneer (codename Lucid): run the Android x86-64 build of Roblox on Linux.
 
 mod app;
 mod audio;
@@ -78,15 +78,15 @@ fn init_logging() {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "lucid - run the Android build of Roblox on Linux\n\n\
+        "Veneer - run the Android build of Roblox on Linux\n\n\
          usage:\n  \
-         lucid install <base.apk> <split_config.x86_64.apk>   unpack the game from APK files\n  \
-         lucid install --from-sober                           reuse the APKs of a Sober install\n  \
-         lucid run [--place <id>] [--no-update]               start Roblox (optionally joining a place);\n  \
+         veneer install <base.apk> <split_config.x86_64.apk>  unpack the game from APK files\n  \
+         veneer install --from-sober                          reuse the APKs of a Sober install\n  \
+         veneer run [--place <id>] [--no-update]              start Roblox (optionally joining a place);\n  \
          \x20                                                    downloads or updates the game first\n  \
-         lucid update                                         only download / update the game\n  \
-         lucid probe                                          load the engine without a window (debug)\n  \
-         lucid desktop-entry [--remove]                       add (or remove) Lucid with its icon to the\n  \
+         veneer update                                        only download / update the game\n  \
+         veneer probe                                         load the engine without a window (debug)\n  \
+         veneer desktop-entry [--remove]                      add (or remove) Veneer with its icon to the\n  \
          \x20                                                    app menu, pointing at this binary\n\n\
          environment:\n  \
          LUCID_LOG=error|warn|info|debug|trace   log verbosity\n  \
@@ -100,7 +100,7 @@ fn cmd_install(args: &[String]) -> ExitCode {
         let found = install::sober_apks();
         if found.is_empty() {
             eprintln!(
-                "lucid: no APKs found in {}",
+                "veneer: no APKs found in {}",
                 paths::sober_package_dir().display()
             );
             return ExitCode::FAILURE;
@@ -123,7 +123,7 @@ fn cmd_install(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("lucid: install failed: {e}");
+            eprintln!("veneer: install failed: {e}");
             ExitCode::FAILURE
         }
     }
@@ -137,7 +137,7 @@ fn cmd_desktop_entry(args: &[String]) -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(e) => {
-                eprintln!("lucid: {e}");
+                eprintln!("veneer: {e}");
                 ExitCode::FAILURE
             }
         };
@@ -153,7 +153,7 @@ fn cmd_desktop_entry(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("lucid: {e}");
+            eprintln!("veneer: {e}");
             ExitCode::FAILURE
         }
     }
@@ -179,7 +179,7 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(e) => {
-                eprintln!("lucid: {e}");
+                eprintln!("veneer: {e}");
                 ExitCode::FAILURE
             }
         },
@@ -189,14 +189,14 @@ fn main() -> ExitCode {
                 || std::env::var_os("LUCID_NO_UPDATE").is_some();
             if skip {
                 if install::installed_version().is_none() {
-                    eprintln!("lucid: the game is not installed; run without --no-update");
+                    eprintln!("veneer: the game is not installed; run without --no-update");
                     return ExitCode::FAILURE;
                 }
             } else if let Err(e) = update::ensure_current() {
-                eprintln!("lucid: {e}");
+                eprintln!("veneer: {e}");
                 return ExitCode::FAILURE;
             }
-            // `lucid run --place <id>` joins an experience directly.
+            // `veneer run --place <id>` joins an experience directly.
             let place = args
                 .iter()
                 .position(|a| a == "--place")
@@ -205,7 +205,7 @@ fn main() -> ExitCode {
             match runtime::run(args[0] == "probe", place) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
-                    eprintln!("lucid: {e}");
+                    eprintln!("veneer: {e}");
                     ExitCode::FAILURE
                 }
             }
