@@ -139,6 +139,19 @@ pub fn run(probe: bool, join_place: Option<i64>) -> Result<(), Box<dyn Error>> {
     crate::bus::install();
     crate::prefs::install();
     load_engine()?;
+    // How many JNI local references are alive, once a minute in the debug
+    // log when it changed: a number that keeps growing is a leak.
+    std::thread::spawn(|| {
+        let mut last = 0;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            let now = lucid_jni::live_local_refs();
+            if now != last {
+                log::debug!("JNI: {now} live local references");
+                last = now;
+            }
+        }
+    });
     startup::application_on_create();
     if probe {
         startup::engine_setup(&device, "")?;

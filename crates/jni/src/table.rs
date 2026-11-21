@@ -699,6 +699,11 @@ unsafe extern "C" fn vm_attach(_vm: *mut JavaVM, out: *mut Env, _args: *mut c_vo
     0
 }
 unsafe extern "C" fn vm_detach(_vm: *mut JavaVM) -> i32 {
+    match crate::detach_current_thread() {
+        Some(0) => {}
+        Some(n) => log::debug!("JNI: DetachCurrentThread released {n} local references"),
+        None => log::debug!("JNI: DetachCurrentThread during a call into the guest; nothing released"),
+    }
     0
 }
 unsafe extern "C" fn vm_get_env(_vm: *mut JavaVM, out: *mut Env, _version: i32) -> i32 {

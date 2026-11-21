@@ -13,7 +13,7 @@ use std::any::Any;
 use std::cell::{RefCell, UnsafeCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 pub use table::{JNIEnv, JavaVM, env, java_vm};
@@ -670,10 +670,61 @@ fn vm_class_object(name: &str) -> Ref {
 }
 
 // --- reference management -----------------------------------------------------
+//
+// Local references live in per-thread frames, as in a real VM. They are
+// released when their frame is popped, when the guest deletes them, when the
+// thread detaches from the VM (`DetachCurrentThread`), or when the thread
+// exits. Threads the engine creates often never push a frame: their locals
+// sit in an implicit bottom frame until one of the last two happens.
+
+/// Local references alive on all threads together (for the debug log).
+static LIVE_LOCALS: AtomicIsize = AtomicIsize::new(0);
+
+struct Locals {
+    frames: Vec<Vec<JObject>>,
+    /// How many `with_frame` calls (host code calling into the guest) are
+    /// running on this thread; while any is, detaching releases nothing.
+    host_depth: usize,
+}
+
+impl Locals {
+    /// Take every frame out, to be released after the borrow ends (a
+    /// released object's drop must not find this thread's state borrowed).
+    fn take_all(&mut self) -> Vec<Vec<JObject>> {
+        std::mem::take(&mut self.frames)
+    }
+}
+
+/// Release the given local references; how many there were.
+fn release(frames: Vec<Vec<JObject>>) -> usize {
+    let mut n = 0;
+    for p in frames.into_iter().flatten() {
+        unsafe { Arc::decrement_strong_count(p as *const Object) };
+        n += 1;
+    }
+    LIVE_LOCALS.fetch_sub(n as isize, Ordering::Relaxed);
+    n
+}
+
+impl Drop for Locals {
+    /// The thread is exiting: nothing can use its locals any more.
+    fn drop(&mut self) {
+        let frames = self.take_all();
+        let n = release(frames);
+        if n > 0 {
+            log::debug!("JNI: thread exit released {n} local references");
+        }
+    }
+}
 
 thread_local! {
-    static FRAMES: RefCell<Vec<Vec<JObject>>> = const { RefCell::new(Vec::new()) };
+    static LOCALS: RefCell<Locals> = const { RefCell::new(Locals { frames: Vec::new(), host_depth: 0 }) };
     static PENDING: RefCell<Option<Ref>> = const { RefCell::new(None) };
+}
+
+/// Local references alive on all threads together.
+pub fn live_local_refs() -> isize {
+    LIVE_LOCALS.load(Ordering::Relaxed)
 }
 
 /// Turn an owned reference into a guest-visible local reference, owned by
@@ -683,12 +734,15 @@ pub fn to_local(r: Option<Ref>) -> JObject {
         None => std::ptr::null_mut(),
         Some(r) => {
             let p = Arc::into_raw(r) as JObject;
-            FRAMES.with(|f| {
-                let mut f = f.borrow_mut();
-                if f.is_empty() {
-                    f.push(Vec::new());
+            // During thread exit the frames may already be gone: then the
+            // reference is simply not tracked (and never released).
+            let _ = LOCALS.try_with(|l| {
+                let mut l = l.borrow_mut();
+                if l.frames.is_empty() {
+                    l.frames.push(Vec::new());
                 }
-                f.last_mut().unwrap().push(p);
+                l.frames.last_mut().unwrap().push(p);
+                LIVE_LOCALS.fetch_add(1, Ordering::Relaxed);
             });
             p
         }
@@ -713,9 +767,9 @@ pub(crate) fn delete_local(o: JObject) {
     if o.is_null() {
         return;
     }
-    let found = FRAMES.with(|f| {
-        let mut f = f.borrow_mut();
-        for frame in f.iter_mut().rev() {
+    let found = LOCALS.with(|l| {
+        let mut l = l.borrow_mut();
+        for frame in l.frames.iter_mut().rev() {
             if let Some(i) = frame.iter().rposition(|p| *p == o) {
                 frame.swap_remove(i);
                 return true;
@@ -724,27 +778,39 @@ pub(crate) fn delete_local(o: JObject) {
         false
     });
     if found {
-        unsafe { Arc::decrement_strong_count(o as *const Object) };
+        release(vec![vec![o]]);
     }
 }
 
 pub fn push_frame() {
-    FRAMES.with(|f| f.borrow_mut().push(Vec::new()));
+    LOCALS.with(|l| l.borrow_mut().frames.push(Vec::new()));
 }
 
 pub fn pop_frame() {
-    let frame = FRAMES.with(|f| f.borrow_mut().pop());
-    for p in frame.unwrap_or_default() {
-        unsafe { Arc::decrement_strong_count(p as *const Object) };
-    }
+    let frame = LOCALS.with(|l| l.borrow_mut().frames.pop());
+    release(frame.into_iter().collect());
+}
+
+/// `DetachCurrentThread`: release every local reference of this thread, as
+/// a real VM does. Not while host code is in the middle of a call into the
+/// guest on this thread (a real VM refuses to detach a thread with Java
+/// frames); then nothing is released. Returns how many were released.
+pub(crate) fn detach_current_thread() -> Option<usize> {
+    let frames = LOCALS.with(|l| {
+        let mut l = l.borrow_mut();
+        (l.host_depth == 0).then(|| l.take_all())
+    })?;
+    Some(release(frames))
 }
 
 /// Run `f` (typically a call into a guest native method) inside its own
 /// local reference frame, releasing every local created during the call.
 pub fn with_frame<R>(f: impl FnOnce() -> R) -> R {
+    LOCALS.with(|l| l.borrow_mut().host_depth += 1);
     push_frame();
     let r = f();
     pop_frame();
+    LOCALS.with(|l| l.borrow_mut().host_depth -= 1);
     r
 }
 
@@ -754,4 +820,84 @@ pub fn pending_exception() -> Option<Ref> {
 
 pub fn set_pending_exception(e: Option<Ref>) {
     PENDING.with(|p| *p.borrow_mut() = e);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fresh object and how many references the test itself holds.
+    fn object() -> Ref {
+        new_string("local reference test")
+    }
+
+    #[test]
+    fn a_popped_frame_releases_its_locals() {
+        let o = object();
+        push_frame();
+        to_local(Some(o.clone()));
+        to_local(Some(o.clone()));
+        assert_eq!(Arc::strong_count(&o), 3);
+        pop_frame();
+        assert_eq!(Arc::strong_count(&o), 1);
+    }
+
+    #[test]
+    fn deleting_a_local_releases_it_once() {
+        let o = object();
+        let local = to_local(Some(o.clone()));
+        delete_local(local);
+        assert_eq!(Arc::strong_count(&o), 1);
+        // A second delete of the same (now dead) reference is ignored.
+        delete_local(local);
+        assert_eq!(Arc::strong_count(&o), 1);
+    }
+
+    #[test]
+    fn detaching_releases_the_threads_locals() {
+        std::thread::spawn(|| {
+            let o = object();
+            // An engine thread: no frame pushed, locals in the bottom frame.
+            to_local(Some(o.clone()));
+            push_frame();
+            to_local(Some(o.clone()));
+            assert_eq!(Arc::strong_count(&o), 3);
+            assert_eq!(detach_current_thread(), Some(2));
+            assert_eq!(Arc::strong_count(&o), 1);
+            // Still usable afterwards (attach again implicitly).
+            to_local(Some(o.clone()));
+            assert_eq!(detach_current_thread(), Some(1));
+            assert_eq!(Arc::strong_count(&o), 1);
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn detaching_inside_a_host_call_releases_nothing() {
+        std::thread::spawn(|| {
+            let o = object();
+            with_frame(|| {
+                to_local(Some(o.clone()));
+                assert_eq!(detach_current_thread(), None);
+                assert_eq!(Arc::strong_count(&o), 2);
+            });
+            assert_eq!(Arc::strong_count(&o), 1);
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn a_thread_exit_releases_its_locals() {
+        let o = object();
+        let theirs = o.clone();
+        std::thread::spawn(move || {
+            to_local(Some(theirs.clone()));
+            to_local(Some(theirs));
+        })
+        .join()
+        .unwrap();
+        assert_eq!(Arc::strong_count(&o), 1);
+    }
 }
