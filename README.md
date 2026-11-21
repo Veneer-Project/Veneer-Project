@@ -331,12 +331,25 @@ Debugging tools:
    (Rich Presence → Art Assets) for the application, or it shows no image.
    The presence's title is the application's name, which code cannot set:
    name the application "Veneer" in the portal.
-7. **JNI local references on engine threads**: the engine creates a
-   `NativeTextBoxInfo` for each text-box focus on its own threads (to pass to
-   `showKeyboard`) and never deletes it; its threads never detach, so (as on
-   a phone) these stay for the session. About 2 per minute while typing,
-   harmless. Debug: `JNI: N live local references` once a minute;
-   `LUCID_JNI_TRACE=1` shows which thread, call and type they come from.
+
+### Roblox engine behaviour (not Veneer bugs)
+
+Things that look like problems in Veneer but come from Roblox's own engine,
+which would behave the same on a phone. Documented so nobody chases them in
+Veneer's code.
+
+- **A small JNI reference leak while typing.** Each time a text box gets
+  focus, the engine creates a `NativeTextBoxInfo` object on one of its own
+  threads (to pass to `showKeyboard`) and never deletes its reference. Its
+  threads stay attached to the Java VM for the whole session and never
+  detach, so on Android these references would stay too. About 2 per minute
+  while typing, harmless.
+  Traced to the engine (`NewObject` called by engine code on its "RBX Worker"
+  threads); Veneer's own reference handling releases correctly (frames,
+  `DeleteLocalRef`, detach and thread exit are covered by tests).
+  To check it yourself: the debug log has `JNI: N live local references` once
+  a minute, and `LUCID_JNI_TRACE=1` lists which thread, call and object type
+  the live references come from.
 
 ## Legal
 
