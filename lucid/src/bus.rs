@@ -86,9 +86,8 @@ pub fn message_id(protocol: &str, method: &str) -> Option<String> {
     })
 }
 
-/// Call `f` with the JSON payload of every message published under `id`.
-/// The callback runs inside the engine: do slow work on another thread.
-pub fn subscribe(id: &str, f: impl Fn(&str) + Send + Sync + 'static) -> bool {
+/// A callback object that runs `f`, for the engine to call.
+fn callback(f: impl Fn(&str) + Send + Sync + 'static) -> Ref {
     let index = {
         let mut subs = SUBSCRIBERS.lock().unwrap();
         subs.push(Box::leak(Box::new(Box::new(f) as Subscriber)));
@@ -96,6 +95,26 @@ pub fn subscribe(id: &str, f: impl Fn(&str) + Send + Sync + 'static) -> bool {
     };
     let callback = new_instance(CALLBACK_IMPL);
     callback.as_instance().unwrap().set("index", index as i64);
+    callback
+}
+
+/// Keep a subscription's callback and connection alive for good.
+fn keep_subscription(callback: Ref, conn: Option<Ref>) -> bool {
+    let mut keep = KEEP.lock().unwrap();
+    keep.push(callback);
+    match conn {
+        Some(c) => {
+            keep.push(c);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Call `f` with the JSON payload of every message published under `id`.
+/// The callback runs inside the engine: do slow work on another thread.
+pub fn subscribe(id: &str, f: impl Fn(&str) + Send + Sync + 'static) -> bool {
+    let callback = callback(f);
     let conn = with_frame(|| {
         let c = jcall_on!(
             local(bus());
@@ -109,15 +128,48 @@ pub fn subscribe(id: &str, f: impl Fn(&str) + Send + Sync + 'static) -> bool {
         )?;
         unsafe { from_raw(c) }
     });
-    let mut keep = KEEP.lock().unwrap();
-    keep.push(callback);
-    match conn {
-        Some(c) => {
-            keep.push(c);
-            true
-        }
-        None => false,
-    }
+    keep_subscription(callback, conn)
+}
+
+/// Call `f` with the JSON of every request the Lua app sends to
+/// `protocol`/`method` (answer with [`publish_response`]).
+pub fn subscribe_requests(protocol: &str, method: &str, f: impl Fn(&str) + Send + Sync + 'static) -> bool {
+    let callback = callback(f);
+    let conn = with_frame(|| {
+        let c = jcall_on!(
+            local(bus());
+            BUS,
+            "doSubscribeProtocolMethodRequestRaw",
+            "(Ljava/lang/String;Ljava/lang/String;Lcom/roblox/universalapp/messagebus/RawCallback;Z)Lcom/roblox/universalapp/messagebus/Connection;",
+            fn(JObject, JObject, JObject, u8) -> JObject,
+            jstr(protocol),
+            jstr(method),
+            local(&callback),
+            0
+        )?;
+        unsafe { from_raw(c) }
+    });
+    keep_subscription(callback, conn)
+}
+
+/// Answer a protocol method request: the response JSON, a status (0 =
+/// success) and the flat string map the Android app sends along with it
+/// (as JSON).
+pub fn publish_response(protocol: &str, method: &str, json: &str, status: i32, extra: &str) {
+    with_frame(|| {
+        jcall_on!(
+            local(bus());
+            BUS,
+            "publishProtocolMethodResponseRaw",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V",
+            fn(JObject, JObject, JObject, i32, JObject),
+            jstr(protocol),
+            jstr(method),
+            jstr(json),
+            status,
+            jstr(extra)
+        );
+    });
 }
 
 /// Answer requests for `protocol`/`method`: `f` maps the request JSON to

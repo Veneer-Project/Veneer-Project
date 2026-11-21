@@ -16,6 +16,7 @@ fn load_engine() -> Result<&'static Image, Box<dyn Error>> {
     }
     lucid_bionic::install();
     lucid_android::install();
+    crate::opensles::install();
     lucid_android::asset::set_root(paths::assets_dir());
     if std::env::var_os("LUCID_LENIENT").is_some() {
         lucid_linker::stubs::LENIENT.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -72,6 +73,8 @@ impl app::Frontend for Engine {
         startup::start_app(&self.device, window, &self.cookies);
         game::subscribe();
         crate::webview::install();
+        // Voice chat checks the microphone through this.
+        crate::permissions::install();
         input::spawn_test_keys();
         input::spawn_test_clicks();
         crate::presence::start();
@@ -136,6 +139,7 @@ pub fn run(probe: bool, join_place: Option<i64>) -> Result<(), Box<dyn Error>> {
     java::install(&device);
     input::install();
     audio::install();
+    crate::voice::install();
     crate::bus::install();
     crate::prefs::install();
     load_engine()?;

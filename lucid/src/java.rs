@@ -259,11 +259,20 @@ pub fn install(device: &Device) {
         vm.on("com/snapchat/djinni/NativeObjectManager", "register", sig, |_, _| ());
     }
 
-    // FMOD: no AAudio or Java audio device yet, so it runs without output.
+    // FMOD (game sound, and the microphone for voice chat) picks its
+    // Android output from these: AAudio if supported, else OpenSL ES on a
+    // low-latency device, else the Java AudioTrack (`audio.rs`). Only AAudio
+    // and OpenSL ES can record, so a low-latency device is reported and FMOD
+    // uses OpenSL ES (`opensles.rs`). LUCID_FMOD_AUDIOTRACK=1 goes back to
+    // the AudioTrack (game sound only, no microphone).
+    let opensl = !std::env::var_os("LUCID_FMOD_AUDIOTRACK").is_some_and(|v| v != "0");
+    if !opensl {
+        log::info!("game sound through AudioTrack (LUCID_FMOD_AUDIOTRACK): no microphone for voice chat");
+    }
     vm.on(FMOD, "checkInit", "()Z", |_, _| true);
     vm.on(FMOD, "supportsAAudio", "()Z", |_, _| false);
-    vm.on(FMOD, "supportsLowLatency", "()Z", |_, _| false);
-    vm.on(FMOD, "lowLatencyFlag", "()Z", |_, _| false);
+    vm.on(FMOD, "supportsLowLatency", "()Z", move |_, _| opensl);
+    vm.on(FMOD, "lowLatencyFlag", "()Z", move |_, _| opensl);
     vm.on(FMOD, "proAudioFlag", "()Z", |_, _| false);
     vm.on(FMOD, "isBluetoothOn", "()Z", |_, _| false);
     vm.on(FMOD, "getOutputSampleRate", "()I", |_, _| 48000);

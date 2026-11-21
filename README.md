@@ -37,6 +37,7 @@ Working (confirmed by use):
 - Joining experiences, from the app or directly with `--place`
 - Leaving back to the home page
 - Vulkan rendering, audio, keyboard, mouse, camera / mouse lock
+- Voice chat: the microphone, and hearing others (see "Voice chat and the microphone")
 - Chat and other text boxes: typing, selection, clipboard, shortcuts
 - F11 fullscreen
 - In-game settings are saved between sessions
@@ -58,7 +59,7 @@ Written but not confirmed:
 
 Not implemented:
 
-- Gamepads, touch, in-game video, camera, voice chat
+- Gamepads, touch, in-game video, camera
 - The "fullscreen" switch inside Roblox's own settings (use F11)
 - Mouse selection inside text boxes, multi-line text boxes (drawn as one line)
 - Crash reporting (Crashpad is deliberately never started)
@@ -170,10 +171,23 @@ Environment variables:
 | `LUCID_LOG` | Terminal verbosity: `error`, `warn`, `info` (default), `debug`, `trace` |
 | `LUCID_FFLAGS` | Extra fast-flag overrides as a JSON object |
 | `LUCID_DISCORD` | Set to `0` to turn Discord Rich Presence off (it is on by default) |
+| `LUCID_FMOD_AUDIOTRACK` | Set to `1` to play game sound the older way (Android `AudioTrack`); there is no microphone then, so voice chat cannot hear you |
 | `LUCID_DISCORD_CLIENT_ID` | Use a different Discord application ID |
 | `LUCID_LENIENT` | Calls to unresolved imports return 0 instead of aborting |
 | `LUCID_NO_GUEST_SIGNALS` | Ignore signal handlers the engine tries to install |
 | `LUCID_JNI_TRACE` | Set to `1` to log where live JNI local references come from (debug log, once a minute and at exit) |
+
+## Voice chat and the microphone
+
+Roblox plays all sound and records the microphone through FMOD, its sound
+engine, which on Android uses OpenSL ES; Veneer provides OpenSL ES on top of
+PulseAudio (PipeWire works too). In the system's sound settings the streams
+show up under "Veneer" ("Game audio" / "Voice chat microphone").
+
+The microphone is only open while voice chat is recording (unmuted), from
+your default input device, and the terminal says so each time:
+`microphone opened (voice chat)` and `microphone closed`. Roblox asks for
+microphone permission; Veneer allows it, as desktops do not ask apps.
 
 ## Where the login is kept
 
@@ -238,7 +252,11 @@ lucid/           The launcher (builds the `veneer` binary):
   runtime.rs     load engine, run       java.rs      static callback classes, jcall! macro
   app.rs         winit window/events    game.rs      join / leave experiences
   input.rs       keys, mouse, text      overlay.rs   native text overlay (Wayland sub-surface)
-  audio.rs       FMOD output (Pulse)    prefs.rs     SharedPreferences
+  audio.rs       FMOD AudioTrack output prefs.rs     SharedPreferences
+  opensles.rs    OpenSL ES (FMOD sound and microphone) on PulseAudio
+  pulse.rs       PulseAudio playback / recording streams
+  voice.rs       WebRTC's WebRtcAudioManager (voice chat)
+  permissions.rs the PermissionsProtocol (microphone permission)
   cookies.rs     login persistence      presence.rs  Discord presence
   keyring.rs     Secret Service (libsecret) access
   flags.rs       default fast flags     crash.rs     fatal signal reporter

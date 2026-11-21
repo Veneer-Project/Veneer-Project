@@ -15,13 +15,17 @@ mod install;
 #[macro_use]
 mod java;
 mod keyring;
+mod opensles;
 mod overlay;
 mod paths;
+mod permissions;
 mod prefs;
+mod pulse;
 mod presence;
 mod runtime;
 mod startup;
 mod update;
+mod voice;
 mod webview;
 mod webview_helper;
 
