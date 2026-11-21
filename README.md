@@ -31,6 +31,8 @@ Working (confirmed by use):
   (updated 2.745.1142 to 2.747.1486 this way)
 - Install from APK files, or from an existing Sober install
 - Only APKs signed by Roblox are installed (see "Only genuine APKs" below)
+- The login is kept in the desktop keyring (GNOME Keyring), moved there
+  from the old file (see "Where the login is kept")
 - Engine boot, home page, login (the session persists across restarts)
 - Joining experiences, from the app or directly with `--place`
 - Leaving back to the home page
@@ -49,8 +51,6 @@ Working (confirmed by use):
 
 Written but not confirmed:
 
-- The login kept in the desktop keyring (see "Where the login is kept"):
-  tested against GNOME Keyring, but not yet through a real game session
 - X11 (only Wayland has been run; text overlay and clipboard are Wayland-only)
 - The window's own icon (X11, and `xdg-toplevel-icon` on KDE Plasma and
   others): not run on a desktop that uses it; only GNOME (Wayland), which
