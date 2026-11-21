@@ -173,6 +173,7 @@ Environment variables:
 | `LUCID_DISCORD_CLIENT_ID` | Use a different Discord application ID |
 | `LUCID_LENIENT` | Calls to unresolved imports return 0 instead of aborting |
 | `LUCID_NO_GUEST_SIGNALS` | Ignore signal handlers the engine tries to install |
+| `LUCID_JNI_TRACE` | Set to `1` to log where live JNI local references come from (debug log, once a minute and at exit) |
 
 ## Where the login is kept
 
@@ -330,11 +331,12 @@ Debugging tools:
    (Rich Presence → Art Assets) for the application, or it shows no image.
    The presence's title is the application's name, which code cannot set:
    name the application "Veneer" in the portal.
-7. **JNI local references on engine threads**: references the engine creates
-   on its own threads and never deletes stay until the thread detaches or
-   exits, as on a real Java VM; this engine never detaches. Measured: about 2
-   per minute (65 after a 12-minute session), so harmless. The debug log
-   reports the count once a minute (`JNI: N live local references`).
+7. **JNI local references on engine threads**: the engine creates a
+   `NativeTextBoxInfo` for each text-box focus on its own threads (to pass to
+   `showKeyboard`) and never deletes it; its threads never detach, so (as on
+   a phone) these stay for the session. About 2 per minute while typing,
+   harmless. Debug: `JNI: N live local references` once a minute;
+   `LUCID_JNI_TRACE=1` shows which thread, call and type they come from.
 
 ## Legal
 

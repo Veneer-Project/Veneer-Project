@@ -92,16 +92,20 @@ fn decode_mutf8(bytes: &[u8]) -> String {
 
 /// A type that can be returned from a `Call*Method` family function.
 pub(crate) trait Ret {
-    fn from_jvalue(v: JValue) -> Self;
+    /// The guest's view of `v`, the result of calling `m`.
+    fn from_jvalue(v: JValue, m: *const Method) -> Self;
 }
 
 impl Ret for () {
-    fn from_jvalue(_: JValue) {}
+    fn from_jvalue(_: JValue, _: *const Method) {}
 }
 impl Ret for JObject {
-    fn from_jvalue(v: JValue) -> JObject {
+    fn from_jvalue(v: JValue, m: *const Method) -> JObject {
         match v {
-            JValue::Object(o) => to_local(o),
+            JValue::Object(o) => crate::to_local_from(o, || {
+                let m = unsafe { &*m };
+                format!("result of {}.{}{}", m.class.name, m.name, m.sig)
+            }),
             _ => std::ptr::null_mut(),
         }
     }
@@ -126,7 +130,7 @@ macro_rules! prim {
             }
         }
         impl Ret for $t {
-            fn from_jvalue(v: JValue) -> Self {
+            fn from_jvalue(v: JValue, _: *const Method) -> Self {
                 <$t as Prim>::from_j(&v)
             }
         }
@@ -194,15 +198,15 @@ unsafe fn dispatch(this: JObject, m: *const Method, args: Vec<JValue>) -> JValue
 // receiver or the class; statics ignore it).
 unsafe extern "C" fn call<R: Ret>(_e: Env, o: JObject, m: *const Method, mut ap: ...) -> R {
     let args = unsafe { args_va(&*m, &mut ap) };
-    R::from_jvalue(unsafe { dispatch(o, m, args) })
+    R::from_jvalue(unsafe { dispatch(o, m, args) }, m)
 }
 unsafe extern "C" fn call_v<R: Ret>(_e: Env, o: JObject, m: *const Method, mut ap: VaList) -> R {
     let args = unsafe { args_va(&*m, &mut ap) };
-    R::from_jvalue(unsafe { dispatch(o, m, args) })
+    R::from_jvalue(unsafe { dispatch(o, m, args) }, m)
 }
 unsafe extern "C" fn call_a<R: Ret>(_e: Env, o: JObject, m: *const Method, a: *const u64) -> R {
     let args = unsafe { args_array(&*m, a) };
-    R::from_jvalue(unsafe { dispatch(o, m, args) })
+    R::from_jvalue(unsafe { dispatch(o, m, args) }, m)
 }
 
 // CallNonvirtual<Type>Method
@@ -214,7 +218,7 @@ unsafe extern "C" fn call_nv<R: Ret>(
     mut ap: ...
 ) -> R {
     let args = unsafe { args_va(&*m, &mut ap) };
-    R::from_jvalue(unsafe { dispatch(o, m, args) })
+    R::from_jvalue(unsafe { dispatch(o, m, args) }, m)
 }
 unsafe extern "C" fn call_nv_v<R: Ret>(
     _e: Env,
@@ -224,7 +228,7 @@ unsafe extern "C" fn call_nv_v<R: Ret>(
     mut ap: VaList,
 ) -> R {
     let args = unsafe { args_va(&*m, &mut ap) };
-    R::from_jvalue(unsafe { dispatch(o, m, args) })
+    R::from_jvalue(unsafe { dispatch(o, m, args) }, m)
 }
 unsafe extern "C" fn call_nv_a<R: Ret>(
     _e: Env,
@@ -234,7 +238,7 @@ unsafe extern "C" fn call_nv_a<R: Ret>(
     a: *const u64,
 ) -> R {
     let args = unsafe { args_array(&*m, a) };
-    R::from_jvalue(unsafe { dispatch(o, m, args) })
+    R::from_jvalue(unsafe { dispatch(o, m, args) }, m)
 }
 
 // --- object creation ----------------------------------------------------------------
@@ -394,7 +398,13 @@ unsafe fn field_set(o: JObject, f: *const Field, v: JValue) {
 }
 
 unsafe extern "C" fn get_object_field(_e: Env, o: JObject, f: *const Field) -> JObject {
-    JObject::from_jvalue(unsafe { field_get(o, f) })
+    match unsafe { field_get(o, f) } {
+        JValue::Object(v) => crate::to_local_from(v, || {
+            let f = unsafe { &*f };
+            format!("field {}.{}", f.class.name, f.name)
+        }),
+        _ => std::ptr::null_mut(),
+    }
 }
 unsafe extern "C" fn set_object_field(_e: Env, o: JObject, f: *const Field, v: JObject) {
     unsafe { field_set(o, f, JValue::Object(from_raw(v))) }
@@ -695,17 +705,22 @@ unsafe extern "C" fn vm_destroy(_vm: *mut JavaVM) -> i32 {
     0
 }
 unsafe extern "C" fn vm_attach(_vm: *mut JavaVM, out: *mut Env, _args: *mut c_void) -> i32 {
+    crate::attach_current_thread();
     unsafe { *out = env() };
     0
 }
 unsafe extern "C" fn vm_detach(_vm: *mut JavaVM) -> i32 {
     match crate::detach_current_thread() {
         Some(0) => {}
-        Some(n) => log::debug!("JNI: DetachCurrentThread released {n} local references"),
+        Some(n) => log::trace!("JNI: DetachCurrentThread released {n} local references"),
         None => log::debug!("JNI: DetachCurrentThread during a call into the guest; nothing released"),
     }
     0
 }
+/// Every thread counts as attached. (Answering `JNI_EDETACHED` for engine
+/// threads, as Android does, was tried: the engine then attaches them once
+/// and never detaches, so nothing is freed, while class lookups take a
+/// different, ClassLoader-based path.)
 unsafe extern "C" fn vm_get_env(_vm: *mut JavaVM, out: *mut Env, _version: i32) -> i32 {
     unsafe { *out = env() };
     0

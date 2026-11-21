@@ -8,6 +8,7 @@
 //! missing pieces are discovered by running.
 
 mod table;
+mod trace;
 
 use std::any::Any;
 use std::cell::{RefCell, UnsafeCell};
@@ -17,6 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 pub use table::{JNIEnv, JavaVM, env, java_vm};
+pub use trace::report as trace_report;
 
 /// A raw JNI reference as seen by the guest (`jobject`): either null or a
 /// pointer obtained from `Arc::into_raw`.
@@ -654,15 +656,18 @@ pub fn install_stdlib() {
             _ => new_string("java.lang.Object"),
         }
     });
-    vm.on(
-        "java/lang/ClassLoader",
-        "loadClass",
-        "(Ljava/lang/String;)Ljava/lang/Class;",
-        |_, args| {
-            let name = args.first().and_then(|a| a.as_str()).unwrap_or("").replace('.', "/");
-            vm_class_object(&name)
-        },
-    );
+    // The engine looks classes up through the app's ClassLoader too.
+    for method in ["loadClass", "findClass"] {
+        vm.on(
+            "java/lang/ClassLoader",
+            method,
+            "(Ljava/lang/String;)Ljava/lang/Class;",
+            |_, args| {
+                let name = args.first().and_then(|a| a.as_str()).unwrap_or("").replace('.', "/");
+                vm_class_object(&name)
+            },
+        );
+    }
 }
 
 fn vm_class_object(name: &str) -> Ref {
@@ -677,13 +682,17 @@ fn vm_class_object(name: &str) -> Ref {
 // exits. Threads the engine creates often never push a frame: their locals
 // sit in an implicit bottom frame until one of the last two happens.
 
+
 /// Local references alive on all threads together (for the debug log).
 static LIVE_LOCALS: AtomicIsize = AtomicIsize::new(0);
 
 struct Locals {
     frames: Vec<Vec<JObject>>,
-    /// How many `with_frame` calls (host code calling into the guest) are
-    /// running on this thread; while any is, detaching releases nothing.
+    /// The bottom frame was created implicitly (a thread that never pushed
+    /// one), so its references stay until detach or thread exit.
+    implicit_bottom: bool,
+    /// How many host calls into the guest (`with_frame`, `call_native`)
+    /// are running on this thread; while any is, detaching releases nothing.
     host_depth: usize,
 }
 
@@ -691,6 +700,7 @@ impl Locals {
     /// Take every frame out, to be released after the borrow ends (a
     /// released object's drop must not find this thread's state borrowed).
     fn take_all(&mut self) -> Vec<Vec<JObject>> {
+        self.implicit_bottom = false;
         std::mem::take(&mut self.frames)
     }
 }
@@ -699,6 +709,7 @@ impl Locals {
 fn release(frames: Vec<Vec<JObject>>) -> usize {
     let mut n = 0;
     for p in frames.into_iter().flatten() {
+        trace::released(p as usize);
         unsafe { Arc::decrement_strong_count(p as *const Object) };
         n += 1;
     }
@@ -718,7 +729,8 @@ impl Drop for Locals {
 }
 
 thread_local! {
-    static LOCALS: RefCell<Locals> = const { RefCell::new(Locals { frames: Vec::new(), host_depth: 0 }) };
+    static LOCALS: RefCell<Locals> =
+        const { RefCell::new(Locals { frames: Vec::new(), implicit_bottom: false, host_depth: 0 }) };
     static PENDING: RefCell<Option<Ref>> = const { RefCell::new(None) };
 }
 
@@ -727,26 +739,53 @@ pub fn live_local_refs() -> isize {
     LIVE_LOCALS.load(Ordering::Relaxed)
 }
 
+static ATTACHES: AtomicIsize = AtomicIsize::new(0);
+static DETACHES: AtomicIsize = AtomicIsize::new(0);
+
+/// How many times the guest attached and detached threads so far.
+pub fn attach_counts() -> (isize, isize) {
+    (ATTACHES.load(Ordering::Relaxed), DETACHES.load(Ordering::Relaxed))
+}
+
+/// `AttachCurrentThread` (every thread counts as attached anyway).
+pub(crate) fn attach_current_thread() {
+    ATTACHES.fetch_add(1, Ordering::Relaxed);
+}
+
 /// Turn an owned reference into a guest-visible local reference, owned by
 /// the current thread's innermost local frame.
+#[track_caller]
 pub fn to_local(r: Option<Ref>) -> JObject {
-    match r {
-        None => std::ptr::null_mut(),
-        Some(r) => {
-            let p = Arc::into_raw(r) as JObject;
-            // During thread exit the frames may already be gone: then the
-            // reference is simply not tracked (and never released).
-            let _ = LOCALS.try_with(|l| {
-                let mut l = l.borrow_mut();
-                if l.frames.is_empty() {
-                    l.frames.push(Vec::new());
-                }
-                l.frames.last_mut().unwrap().push(p);
-                LIVE_LOCALS.fetch_add(1, Ordering::Relaxed);
-            });
-            p
+    let at = std::panic::Location::caller();
+    to_local_from(r, || {
+        let file = at.file().rsplit('/').next().unwrap_or(at.file());
+        format!("{file}:{}", at.line())
+    })
+}
+
+/// [`to_local`], saying what created the reference (for `LUCID_JNI_TRACE`).
+pub(crate) fn to_local_from(r: Option<Ref>, origin: impl FnOnce() -> String) -> JObject {
+    let Some(r) = r else {
+        return std::ptr::null_mut();
+    };
+    let class = r.class_name();
+    let p = Arc::into_raw(r) as JObject;
+    // During thread exit the frames may already be gone: then the
+    // reference is simply not tracked (and never released).
+    let bottom = LOCALS.try_with(|l| {
+        let mut l = l.borrow_mut();
+        if l.frames.is_empty() {
+            l.frames.push(Vec::new());
+            l.implicit_bottom = true;
         }
+        l.frames.last_mut().unwrap().push(p);
+        LIVE_LOCALS.fetch_add(1, Ordering::Relaxed);
+        l.implicit_bottom && l.frames.len() == 1
+    });
+    if let Ok(bottom) = bottom {
+        trace::created(p as usize, bottom, || format!("{} | {class}", origin()));
     }
+    p
 }
 
 /// Get an owned reference from a guest `jobject`.
@@ -787,7 +826,14 @@ pub fn push_frame() {
 }
 
 pub fn pop_frame() {
-    let frame = LOCALS.with(|l| l.borrow_mut().frames.pop());
+    let frame = LOCALS.with(|l| {
+        let mut l = l.borrow_mut();
+        let frame = l.frames.pop();
+        if l.frames.is_empty() {
+            l.implicit_bottom = false;
+        }
+        frame
+    });
     release(frame.into_iter().collect());
 }
 
@@ -796,9 +842,13 @@ pub fn pop_frame() {
 /// guest on this thread (a real VM refuses to detach a thread with Java
 /// frames); then nothing is released. Returns how many were released.
 pub(crate) fn detach_current_thread() -> Option<usize> {
+    DETACHES.fetch_add(1, Ordering::Relaxed);
     let frames = LOCALS.with(|l| {
         let mut l = l.borrow_mut();
-        (l.host_depth == 0).then(|| l.take_all())
+        if l.host_depth > 0 {
+            return None;
+        }
+        Some(l.take_all())
     })?;
     Some(release(frames))
 }
@@ -812,6 +862,47 @@ pub fn with_frame<R>(f: impl FnOnce() -> R) -> R {
     pop_frame();
     LOCALS.with(|l| l.borrow_mut().host_depth -= 1);
     r
+}
+
+/// A guest native method's return value, carried out of the frame the
+/// call ran in: an object result moves to the caller's frame.
+pub trait NativeResult {
+    type Kept;
+    fn keep(self) -> Self::Kept;
+    fn restore(kept: Self::Kept) -> Self;
+}
+
+impl NativeResult for JObject {
+    type Kept = Option<Ref>;
+    fn keep(self) -> Option<Ref> {
+        unsafe { from_raw(self) }
+    }
+    fn restore(kept: Option<Ref>) -> JObject {
+        to_local_from(kept, || "result of a guest native method".into())
+    }
+}
+
+macro_rules! plain_native_result {
+    ($($t:ty),*) => {$(
+        impl NativeResult for $t {
+            type Kept = $t;
+            fn keep(self) -> $t {
+                self
+            }
+            fn restore(kept: $t) -> $t {
+                kept
+            }
+        }
+    )*};
+}
+plain_native_result!((), u8, i8, u16, i16, i32, i64, f32, f64);
+
+/// Call a guest native method the way a VM does: in its own local frame
+/// (what the native creates is released when it returns, except its
+/// result, which moves to the caller's frame).
+pub fn call_native<R: NativeResult>(f: impl FnOnce() -> R) -> R {
+    let kept = with_frame(|| f().keep());
+    R::restore(kept)
 }
 
 pub fn pending_exception() -> Option<Ref> {
@@ -883,6 +974,31 @@ mod tests {
                 assert_eq!(Arc::strong_count(&o), 2);
             });
             assert_eq!(Arc::strong_count(&o), 1);
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn a_native_call_keeps_only_its_result() {
+        std::thread::spawn(|| {
+            let made_inside = object();
+            let result = object();
+            push_frame();
+            let r: JObject = call_native(|| {
+                // What the native creates and does not return...
+                to_local(Some(made_inside.clone()));
+                to_local(Some(made_inside.clone()));
+                to_local(Some(result.clone()))
+            });
+            // ...is gone; the result is a local in the caller's frame.
+            assert_eq!(Arc::strong_count(&made_inside), 1);
+            assert_eq!(Arc::strong_count(&result), 2);
+            assert!(Arc::ptr_eq(&unsafe { from_raw(r) }.unwrap(), &result));
+            pop_frame();
+            assert_eq!(Arc::strong_count(&result), 1);
+            // Plain results pass through.
+            assert_eq!(call_native(|| 7i32), 7);
         })
         .join()
         .unwrap();

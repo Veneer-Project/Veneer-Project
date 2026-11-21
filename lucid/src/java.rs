@@ -50,8 +50,10 @@ macro_rules! jcall_on {
                 let f: unsafe extern "C" fn(*mut lucid_jni::JNIEnv, lucid_jni::JObject $(, $t)*) $(-> $r)? =
                     unsafe { std::mem::transmute(addr) };
                 log::debug!("-> {}.{}", $class, $name);
-                let recv = $recv;
-                let r = unsafe { f(lucid_jni::env(), recv $(, $a)*) };
+                // In its own local frame, as a VM
+                // calls natives; an object result moves to the caller's
+                // frame. The receiver and arguments are made inside it.
+                let r = lucid_jni::call_native(|| unsafe { f(lucid_jni::env(), $recv $(, $a)*) });
                 log::debug!("<- {}.{}", $class, $name);
                 Some(r)
             }

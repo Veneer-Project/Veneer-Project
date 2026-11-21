@@ -147,7 +147,11 @@ pub fn run(probe: bool, join_place: Option<i64>) -> Result<(), Box<dyn Error>> {
             std::thread::sleep(std::time::Duration::from_secs(60));
             let now = lucid_jni::live_local_refs();
             if now != last {
-                log::debug!("JNI: {now} live local references");
+                let (attaches, detaches) = lucid_jni::attach_counts();
+                log::debug!(
+                    "JNI: {now} live local references (threads attached {attaches}, detached {detaches} times)"
+                );
+                log_jni_trace();
                 last = now;
             }
         }
@@ -156,6 +160,7 @@ pub fn run(probe: bool, join_place: Option<i64>) -> Result<(), Box<dyn Error>> {
     if probe {
         startup::engine_setup(&device, "")?;
         startup::client_settings()?;
+        log_jni_trace();
         return Ok(());
     }
     // Keep the saved session in step with what the engine reports. The
@@ -176,6 +181,17 @@ pub fn run(probe: bool, join_place: Option<i64>) -> Result<(), Box<dyn Error>> {
         started: false,
         input: input::Input::default(),
     })?;
+    log_jni_trace();
     // Engine threads are still running; leave without unwinding them.
     unsafe { libc::_exit(0) }
+}
+
+/// With `LUCID_JNI_TRACE=1`: what created the live JNI local references.
+fn log_jni_trace() {
+    if let Some(report) = lucid_jni::trace_report(25) {
+        log::debug!(
+            "JNI: {} live local references, by thread | origin | type | frame:\n{report}",
+            lucid_jni::live_local_refs()
+        );
+    }
 }
