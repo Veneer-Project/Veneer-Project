@@ -37,7 +37,8 @@ Working (confirmed by use):
 - Joining experiences, from the app or directly with `--place`
 - Leaving back to the home page
 - Vulkan rendering, audio, keyboard, mouse, camera / mouse lock
-- Voice chat: the microphone, and hearing others (see "Voice chat and the microphone")
+- Voice chat: speaking (microphone), hearing others, mute / unmute (see
+  "Voice chat and the microphone")
 - Chat and other text boxes: typing, selection, clipboard, shortcuts
 - F11 fullscreen
 - In-game settings are saved between sessions
