@@ -14,6 +14,7 @@ mod input;
 mod install;
 #[macro_use]
 mod java;
+mod keyring;
 mod overlay;
 mod paths;
 mod prefs;

@@ -49,6 +49,8 @@ Working (confirmed by use):
 
 Written but not confirmed:
 
+- The login kept in the desktop keyring (see "Where the login is kept"):
+  tested against GNOME Keyring, but not yet through a real game session
 - X11 (only Wayland has been run; text overlay and clipboard are Wayland-only)
 - The window's own icon (X11, and `xdg-toplevel-icon` on KDE Plasma and
   others): not run on a desktop that uses it; only GNOME (Wayland), which
@@ -144,7 +146,7 @@ Where things live:
 | `~/.local/share/veneer/app/` | Libraries and assets unpacked from the APK, `version` |
 | `~/.local/share/veneer/files/` | The app's private files (Android `filesDir`) |
 | `~/.local/share/veneer/prefs/` | Android `SharedPreferences`, one JSON file each |
-| `~/.local/share/veneer/cookies` | The login session (mode 0600) — treat as a password |
+| `~/.local/share/veneer/cookies` | The login session, only when there is no keyring (mode 0600) — treat as a password |
 | `~/.local/share/veneer/play_login.json` | The anonymous Google Play login from the last update check, reused until it expires |
 | `~/.local/share/veneer/logs/latest.log` | Debug log of the last run, overwritten each start |
 | `~/.cache/veneer/` | The app's cache directory |
@@ -171,6 +173,24 @@ Environment variables:
 | `LUCID_DISCORD_CLIENT_ID` | Use a different Discord application ID |
 | `LUCID_LENIENT` | Calls to unresolved imports return 0 instead of aborting |
 | `LUCID_NO_GUEST_SIGNALS` | Ignore signal handlers the engine tries to install |
+
+## Where the login is kept
+
+Your Roblox login (the session cookies) is kept in the desktop's keyring:
+GNOME Keyring, KWallet or any other Secret Service, as the item "Veneer:
+Roblox login". There it is encrypted with your login password, locked while
+you are logged out, and not in any file that a stealer searching your disk
+(by file name or for Roblox's cookie text) could find. A login saved by an
+older version in `~/.local/share/veneer/cookies` is moved into the keyring
+on the next start, and the file is deleted once the keyring has it.
+
+Without a keyring (libsecret missing, or no Secret Service running) the
+login stays in that file, readable only by you, and Veneer says so once.
+
+What it does not protect against: malware already running as your user
+while you are logged in. It can ask the keyring itself (GNOME Keyring does
+not check which program asks), or read the game's memory. No program can
+fully protect against that; only sandboxes such as Flatpak get closer.
 
 ## Only genuine APKs
 
@@ -219,6 +239,7 @@ lucid/           The launcher (builds the `veneer` binary):
   input.rs       keys, mouse, text      overlay.rs   native text overlay (Wayland sub-surface)
   audio.rs       FMOD output (Pulse)    prefs.rs     SharedPreferences
   cookies.rs     login persistence      presence.rs  Discord presence
+  keyring.rs     Secret Service (libsecret) access
   flags.rs       default fast flags     crash.rs     fatal signal reporter
   bus.rs         engine message bus     webview.rs   web pages (app side)
   webview_helper.rs  the embedded browser process (`veneer webview`, GTK + WebKitGTK)
