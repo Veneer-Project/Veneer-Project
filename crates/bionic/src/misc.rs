@@ -230,6 +230,26 @@ unsafe extern "C" fn guest_mprotect(addr: *mut c_void, len: size_t, prot: c_int)
     unsafe { libc::mprotect(addr, len, prot) }
 }
 
+// --- the process stays protected ------------------------------------------------
+//
+// Veneer marks itself not dumpable at startup (see the binary's `main`), so
+// other programs of the same user cannot attach to it or read its memory.
+// The guest may not undo that.
+
+unsafe extern "C" fn guest_prctl(
+    option: c_int,
+    a2: libc::c_ulong,
+    a3: libc::c_ulong,
+    a4: libc::c_ulong,
+    a5: libc::c_ulong,
+) -> c_int {
+    if option == libc::PR_SET_DUMPABLE && a2 != 0 {
+        log::debug!("guest prctl(PR_SET_DUMPABLE, {a2}) ignored");
+        return 0;
+    }
+    unsafe { libc::prctl(option, a2, a3, a4, a5) }
+}
+
 // --- process control we do not let the guest do ------------------------------
 
 unsafe extern "C" fn fork() -> c_int {
@@ -312,6 +332,7 @@ pub fn symbols(m: &mut HashMap<&'static str, usize>) {
     m.insert("mmap", guest_mmap as usize);
     m.insert("mmap64", guest_mmap as usize);
     m.insert("mprotect", guest_mprotect as usize);
+    m.insert("prctl", guest_prctl as usize);
     m.insert("fork", fork as usize);
     m.insert("execv", exec_denied as usize);
     m.insert("execve", exec_denied as usize);

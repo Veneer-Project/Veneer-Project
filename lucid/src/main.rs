@@ -180,7 +180,19 @@ fn cmd_desktop_entry(args: &[String]) -> ExitCode {
     }
 }
 
+/// Keep other programs of the same user out of this process: once it is not
+/// "dumpable", the kernel lets only root attach to it (ptrace) or read and
+/// write its memory (`/proc/<pid>/mem`, `process_vm_readv` / `writev`).
+/// First thing in `main`, so the embedded browser helper (which holds the
+/// login while a page is open) is covered too.
+fn protect_process() {
+    if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
+        eprintln!("veneer: could not protect the process: {}", std::io::Error::last_os_error());
+    }
+}
+
 fn main() -> ExitCode {
+    protect_process();
     // The embedded browser runs as a child process of ourselves.
     if std::env::args().nth(1).as_deref() == Some("webview") {
         return ExitCode::from(webview_helper::run() as u8);

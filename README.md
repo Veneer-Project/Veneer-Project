@@ -31,6 +31,8 @@ Working (confirmed by use):
   (updated 2.745.1142 to 2.747.1486 this way)
 - Install from APK files, or from an existing Sober install
 - Only APKs signed by Roblox are installed (see "Only genuine APKs" below)
+- Other programs cannot attach to Veneer or read its memory (see "Process
+  protection")
 - The login is kept in the desktop keyring (GNOME Keyring), moved there
   from the old file (see "Where the login is kept")
 - Engine boot, home page, login (the session persists across restarts)
@@ -207,6 +209,14 @@ What it does not protect against: malware already running as your user
 while you are logged in. It can ask the keyring itself (GNOME Keyring does
 not check which program asks), or read the game's memory. No program can
 fully protect against that; only sandboxes such as Flatpak get closer.
+
+## Process protection
+
+Veneer's processes (the game and the embedded browser) are marked so that
+other programs running as your user cannot attach to them as a debugger or
+read or change their memory. The kernel refuses it (`ptrace`,
+`/proc/<pid>/mem`, `process_vm_readv` / `process_vm_writev`), whatever the
+system's ptrace setting. The game engine cannot turn this off.
 
 ## Only genuine APKs
 
