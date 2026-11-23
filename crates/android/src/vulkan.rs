@@ -269,6 +269,105 @@ unsafe extern "C" fn get_surface_capabilities(
     r
 }
 
+const VK_SUBOPTIMAL_KHR: i32 = 1000001003;
+
+/// `VK_SUBOPTIMAL_KHR` → `VK_SUCCESS`, logged the first time.
+///
+/// The image is still valid and presentable; "suboptimal" only says a new
+/// swapchain would suit the surface better. Android practically never
+/// returns it (only for rotation, which a desktop window does not have),
+/// and the engine treats it as fatal: it crashes a moment later. Mesa on
+/// Wayland returns it whenever the compositor's dma-buf feedback changes,
+/// which KWin does when the window goes fullscreen (direct scanout). The
+/// engine recreates its swapchain on the next resize anyway.
+fn hide_suboptimal(r: i32, call: &str) -> i32 {
+    if r != VK_SUBOPTIMAL_KHR {
+        return r;
+    }
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| log::debug!("{call} returned VK_SUBOPTIMAL_KHR; reported as VK_SUCCESS"));
+    VK_SUCCESS
+}
+
+unsafe extern "C" fn acquire_next_image(
+    device: usize,
+    swapchain: u64,
+    timeout: u64,
+    semaphore: u64,
+    fence: u64,
+    index: *mut u32,
+) -> i32 {
+    let Some(f) = host_sym("vkAcquireNextImageKHR") else {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    };
+    let f: unsafe extern "C" fn(usize, u64, u64, u64, u64, *mut u32) -> i32 =
+        unsafe { std::mem::transmute(f) };
+    hide_suboptimal(
+        unsafe { f(device, swapchain, timeout, semaphore, fence, index) },
+        "vkAcquireNextImageKHR",
+    )
+}
+
+unsafe extern "C" fn acquire_next_image2(device: usize, info: *const c_void, index: *mut u32) -> i32 {
+    let Some(f) = host_sym("vkAcquireNextImage2KHR") else {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    };
+    let f: unsafe extern "C" fn(usize, *const c_void, *mut u32) -> i32 = unsafe { std::mem::transmute(f) };
+    hide_suboptimal(unsafe { f(device, info, index) }, "vkAcquireNextImage2KHR")
+}
+
+#[repr(C)]
+struct PresentInfo {
+    s_type: u32,
+    p_next: *const c_void,
+    wait_semaphore_count: u32,
+    wait_semaphores: *const u64,
+    swapchain_count: u32,
+    swapchains: *const u64,
+    image_indices: *const u32,
+    results: *mut i32,
+}
+
+unsafe extern "C" fn queue_present(queue: usize, info: *const PresentInfo) -> i32 {
+    let Some(f) = host_sym("vkQueuePresentKHR") else {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    };
+    let f: unsafe extern "C" fn(usize, *const PresentInfo) -> i32 = unsafe { std::mem::transmute(f) };
+    let r = unsafe { f(queue, info) };
+    let info = unsafe { &*info };
+    if !info.results.is_null() {
+        let results = unsafe { std::slice::from_raw_parts_mut(info.results, info.swapchain_count as usize) };
+        for r in results {
+            *r = hide_suboptimal(*r, "vkQueuePresentKHR");
+        }
+    }
+    hide_suboptimal(r, "vkQueuePresentKHR")
+}
+
+unsafe extern "C" fn get_device_proc_addr(device: usize, name: *const c_char) -> usize {
+    let n = unsafe { CStr::from_ptr(name) }.to_string_lossy();
+    if let Some(a) = device_overrides(&n) {
+        return a;
+    }
+    let Some(f) = host_sym("vkGetDeviceProcAddr") else {
+        return 0;
+    };
+    let f: unsafe extern "C" fn(usize, *const c_char) -> usize = unsafe { std::mem::transmute(f) };
+    unsafe { f(device, name) }
+}
+
+/// Device-level functions replaced here; looked up by `vkGetDeviceProcAddr`
+/// too, so the engine gets them however it asks.
+fn device_overrides(name: &str) -> Option<usize> {
+    Some(match name {
+        "vkAcquireNextImageKHR" => acquire_next_image as usize,
+        "vkAcquireNextImage2KHR" => acquire_next_image2 as usize,
+        "vkQueuePresentKHR" => queue_present as usize,
+        "vkGetDeviceProcAddr" => get_device_proc_addr as usize,
+        _ => return None,
+    })
+}
+
 fn overrides() -> &'static HashMap<&'static str, usize> {
     static OVERRIDES: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();
     OVERRIDES.get_or_init(|| {
@@ -284,6 +383,14 @@ fn overrides() -> &'static HashMap<&'static str, usize> {
             get_surface_capabilities as usize,
         );
         m.insert("vkGetInstanceProcAddr", get_instance_proc_addr as usize);
+        for name in [
+            "vkAcquireNextImageKHR",
+            "vkAcquireNextImage2KHR",
+            "vkQueuePresentKHR",
+            "vkGetDeviceProcAddr",
+        ] {
+            m.insert(name, device_overrides(name).unwrap());
+        }
         m
     })
 }
