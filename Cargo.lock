@@ -1206,7 +1206,7 @@ checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
 name = "lucid"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "ab_glyph",
  "gpapi",
@@ -1234,7 +1234,7 @@ dependencies = [
 
 [[package]]
 name = "lucid-android"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "libc",
  "log",
@@ -1243,7 +1243,7 @@ dependencies = [
 
 [[package]]
 name = "lucid-bionic"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "libc",
  "log",
@@ -1252,14 +1252,14 @@ dependencies = [
 
 [[package]]
 name = "lucid-discord"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "log",
 ]
 
 [[package]]
 name = "lucid-jni"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "libc",
  "log",
@@ -1267,7 +1267,7 @@ dependencies = [
 
 [[package]]
 name = "lucid-linker"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "libc",
  "log",
