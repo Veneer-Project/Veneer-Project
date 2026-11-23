@@ -1,0 +1,102 @@
+# Builds Veneer when a GitHub release is published and attaches:
+#   veneer-<version>-x86_64-linux          the bare ELF binary
+#   veneer-<version>-x86_64-linux.tar.gz   binary + desktop file + icons + docs
+#   veneer_<version>_amd64.deb             Debian / Ubuntu
+#   veneer-<version>-1.x86_64.rpm          Fedora / openSUSE
+#
+# The build runs on Debian 12 so the binary needs only glibc 2.36 and runs on
+# most current distributions. To rebuild the files of an existing release,
+# run the workflow by hand ("Run workflow") and give the release tag.
+
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of an existing release to (re)build
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: debian:12
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential perl make curl ca-certificates git dpkg-dev binutils
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb,cargo-generate-rpm
+
+      - name: Version from tag
+        id: version
+        run: |
+          # v1.2.3 -> 1.2.3; 1.2.3-beta.1 -> 1.2.3~beta.1 (sorts before 1.2.3 in dpkg and rpm)
+          version="${TAG#v}"
+          version="$(printf '%s' "$version" | tr '-' '~')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: cargo build --release --locked -p lucid
+
+      - name: Strip
+        run: strip --strip-debug target/release/veneer
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          name="veneer-${TAG#v}-x86_64-linux"
+
+          cp target/release/veneer "dist/$name"
+
+          mkdir -p "stage/$name"
+          cp target/release/veneer packaging/veneer.desktop README.md LICENSE "stage/$name/"
+          cp -r assets/icons "stage/$name/icons"
+          cp assets/logo.svg "stage/$name/icons/veneer.svg"
+          tar -C stage -czf "dist/$name.tar.gz" "$name"
+
+          cargo deb -p lucid --no-build --no-strip --deb-version "$VERSION" -o dist/
+          cargo generate-rpm -p lucid -s "version = \"$VERSION\"" -o dist/
+
+          cd dist && sha256sum * > SHA256SUMS && ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: veneer-${{ steps.version.outputs.version }}
+          path: dist/*
+
+  upload:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Attach to the release
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"

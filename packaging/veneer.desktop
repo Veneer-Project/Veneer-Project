@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Veneer
+Comment=Run the Android build of Roblox on Linux
+Keywords=Roblox;
+Exec=veneer run
+Icon=veneer
+Terminal=false
+Categories=Game;
+StartupWMClass=veneer
+SingleMainWindow=true

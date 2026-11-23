@@ -67,6 +67,14 @@ Not implemented:
 - Mouse selection inside text boxes, multi-line text boxes (drawn as one line)
 - Crash reporting (Crashpad is deliberately never started)
 
+## Install
+
+Every [release](https://github.com/butdoge33/Veneer-Project/releases) has
+ready-made x86-64 builds: a `.deb` (Debian, Ubuntu), an `.rpm` (Fedora,
+openSUSE), and the plain `veneer` binary (also as a `.tar.gz` with the
+launcher and icons). The packages install the app menu entry and icons, so
+`veneer desktop-entry` is not needed with them.
+
 ## Build and run
 
 Needs a stable Rust toolchain (built with 1.100) and, at run time, the usual

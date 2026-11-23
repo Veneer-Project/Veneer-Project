@@ -3,6 +3,7 @@ name = "lucid"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Open-source runtime that runs the Android build of Roblox on Linux"
 
 # The project is Veneer (codename Lucid): the command is `veneer`, while the
 # crates, data folders and app ID keep the codename.
@@ -48,3 +49,60 @@ vendored-openssl = ["dep:reqwest", "reqwest/native-tls-vendored-no-alpn"]
 
 [lints]
 workspace = true
+
+# Packages built by .github/workflows/release.yml (cargo-deb and
+# cargo-generate-rpm). The runtime libraries are loaded with dlopen, so they
+# are not found automatically and are listed here by hand.
+[package.metadata.deb]
+name = "veneer"
+maintainer = "Veneer Project"
+copyright = "Veneer Project contributors"
+license-file = ["../LICENSE", "0"]
+extended-description = """\
+Veneer loads the official Android x86-64 build of Roblox into a normal Linux \
+process and supplies the Android system libraries it expects."""
+section = "games"
+priority = "optional"
+depends = "$auto, libvulkan1, libwayland-client0, libwayland-egl1, libegl1, libpulse0"
+recommends = "libwebkit2gtk-4.1-0, libgtk-3-0t64 | libgtk-3-0"
+assets = [
+    ["target/release/veneer", "usr/bin/", "755"],
+    ["../packaging/veneer.desktop", "usr/share/applications/", "644"],
+    ["../assets/logo.svg", "usr/share/icons/hicolor/scalable/apps/veneer.svg", "644"],
+    ["../assets/icons/16.png", "usr/share/icons/hicolor/16x16/apps/veneer.png", "644"],
+    ["../assets/icons/24.png", "usr/share/icons/hicolor/24x24/apps/veneer.png", "644"],
+    ["../assets/icons/32.png", "usr/share/icons/hicolor/32x32/apps/veneer.png", "644"],
+    ["../assets/icons/48.png", "usr/share/icons/hicolor/48x48/apps/veneer.png", "644"],
+    ["../assets/icons/64.png", "usr/share/icons/hicolor/64x64/apps/veneer.png", "644"],
+    ["../assets/icons/128.png", "usr/share/icons/hicolor/128x128/apps/veneer.png", "644"],
+    ["../assets/icons/256.png", "usr/share/icons/hicolor/256x256/apps/veneer.png", "644"],
+    ["../assets/icons/512.png", "usr/share/icons/hicolor/512x512/apps/veneer.png", "644"],
+    ["../README.md", "usr/share/doc/veneer/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "veneer"
+summary = "Run the Android build of Roblox on Linux"
+url = "https://github.com/butdoge33/Veneer-Project"
+assets = [
+    { source = "target/release/veneer", dest = "/usr/bin/veneer", mode = "755" },
+    { source = "../packaging/veneer.desktop", dest = "/usr/share/applications/veneer.desktop", mode = "644" },
+    { source = "../assets/logo.svg", dest = "/usr/share/icons/hicolor/scalable/apps/veneer.svg", mode = "644" },
+    { source = "../assets/icons/16.png", dest = "/usr/share/icons/hicolor/16x16/apps/veneer.png", mode = "644" },
+    { source = "../assets/icons/24.png", dest = "/usr/share/icons/hicolor/24x24/apps/veneer.png", mode = "644" },
+    { source = "../assets/icons/32.png", dest = "/usr/share/icons/hicolor/32x32/apps/veneer.png", mode = "644" },
+    { source = "../assets/icons/48.png", dest = "/usr/share/icons/hicolor/48x48/apps/veneer.png", mode = "644" },
+    { source = "../assets/icons/64.png", dest = "/usr/share/icons/hicolor/64x64/apps/veneer.png", mode = "644" },
+    { source = "../assets/icons/128.png", dest = "/usr/share/icons/hicolor/128x128/apps/veneer.png", mode = "644" },
+    { source = "../assets/icons/256.png", dest = "/usr/share/icons/hicolor/256x256/apps/veneer.png", mode = "644" },
+    { source = "../assets/icons/512.png", dest = "/usr/share/icons/hicolor/512x512/apps/veneer.png", mode = "644" },
+    { source = "../README.md", dest = "/usr/share/doc/veneer/README.md", mode = "644", doc = true },
+    { source = "../LICENSE", dest = "/usr/share/licenses/veneer/LICENSE", mode = "644", doc = true },
+]
+
+[package.metadata.generate-rpm.requires]
+"libvulkan.so.1()(64bit)" = "*"
+"libwayland-client.so.0()(64bit)" = "*"
+"libwayland-egl.so.1()(64bit)" = "*"
+"libEGL.so.1()(64bit)" = "*"
+"libpulse-simple.so.0()(64bit)" = "*"
