@@ -69,7 +69,7 @@ Not implemented:
 
 ## Install
 
-Every [release](https://github.com/butdoge33/Veneer-Project/releases) has
+Every [release](https://github.com/Veneer-Project/Veneer-Project/releases) has
 ready-made x86-64 builds: a `.deb` (Debian, Ubuntu), an `.rpm` (Fedora,
 openSUSE), and the plain `veneer` binary (also as a `.tar.gz` with the
 launcher and icons). The packages install the app menu entry and icons, so

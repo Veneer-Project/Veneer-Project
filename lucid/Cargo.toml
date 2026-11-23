@@ -83,7 +83,7 @@ assets = [
 [package.metadata.generate-rpm]
 name = "veneer"
 summary = "Run the Android build of Roblox on Linux"
-url = "https://github.com/butdoge33/Veneer-Project"
+url = "https://github.com/Veneer-Project/Veneer-Project"
 assets = [
     { source = "target/release/veneer", dest = "/usr/bin/veneer", mode = "755" },
     { source = "../packaging/veneer.desktop", dest = "/usr/share/applications/veneer.desktop", mode = "644" },
