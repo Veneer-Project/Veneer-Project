@@ -1,5 +1,6 @@
-//! Veneer (codename Lucid): run the Android x86-64 build of Roblox on Linux.
+//! Veneer (codename Lucid): run the Android x86-64 or arm64 build of Roblox on Linux.
 
+mod abi;
 mod apk_signature;
 mod app;
 mod audio;
@@ -101,7 +102,7 @@ fn usage() -> ExitCode {
     eprintln!(
         "Veneer - run the Android build of Roblox on Linux\n\n\
          usage:\n  \
-         veneer install <base.apk> <split_config.x86_64.apk>  unpack the game from APK files\n  \
+         veneer install <base.apk> <{split}>  unpack the game from APK files\n  \
          veneer install --from-sober                          reuse the APKs of a Sober install\n  \
          veneer run [--place <id>] [--no-update]              start Roblox (optionally joining a place);\n  \
          \x20                                                    downloads or updates the game first\n  \
@@ -111,7 +112,8 @@ fn usage() -> ExitCode {
          \x20                                                    app menu, pointing at this binary\n\n\
          environment:\n  \
          LUCID_LOG=error|warn|info|debug|trace   log verbosity\n  \
-         LUCID_DISCORD=0                         turn Discord Rich Presence off"
+         LUCID_DISCORD=0                         turn Discord Rich Presence off",
+        split = crate::abi::split_apk(),
     );
     ExitCode::from(2)
 }

@@ -43,13 +43,20 @@ unsafe extern "C" fn sysconf(name: c_int) -> c_long {
 
 // --- system properties -----------------------------------------------------
 
+/// The Android ABI name of the CPU Veneer runs on.
+#[cfg(target_arch = "x86_64")]
+const ABI: &str = "x86_64";
+#[cfg(target_arch = "aarch64")]
+const ABI: &str = "arm64-v8a";
+
 fn property(name: &str) -> &'static str {
     match name {
         "ro.build.version.sdk" => "33",
         "ro.build.version.release" => "13",
         "ro.build.version.codename" => "REL",
-        "ro.product.cpu.abi" => "x86_64",
-        "ro.product.cpu.abilist" => "x86_64",
+        "ro.product.cpu.abi" => ABI,
+        "ro.product.cpu.abilist" => ABI,
+        "ro.product.cpu.abilist64" => ABI,
         "ro.product.model" => "Linux",
         "ro.product.manufacturer" => "Lucid",
         "ro.product.brand" => "Lucid",
@@ -289,12 +296,6 @@ unsafe extern "C" fn no_tty() -> c_int {
     -1
 }
 
-unsafe extern "C" fn dbg_getattr_np(t: libc::pthread_t, attr: *mut libc::pthread_attr_t) -> c_int {
-    let r = unsafe { libc::pthread_getattr_np(t, attr) };
-    log::debug!("pthread_getattr_np({t:#x}) -> {r}");
-    r
-}
-
 unsafe extern "C" fn dbg_attr_getstack(
     attr: *const libc::pthread_attr_t,
     base: *mut *mut c_void,
@@ -306,7 +307,6 @@ unsafe extern "C" fn dbg_attr_getstack(
 }
 
 pub fn symbols(m: &mut HashMap<&'static str, usize>) {
-    m.insert("pthread_getattr_np", dbg_getattr_np as usize);
     m.insert("pthread_attr_getstack", dbg_attr_getstack as usize);
     m.insert("__errno", errno_location as usize);
     m.insert("__stack_chk_guard", &raw const STACK_CHK_GUARD as usize);

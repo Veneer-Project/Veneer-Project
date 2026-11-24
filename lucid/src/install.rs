@@ -5,9 +5,8 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::paths;
+use crate::{abi, paths};
 
-const ABI_PREFIX: &str = "lib/x86_64/";
 const ASSET_PREFIX: &str = "assets/";
 
 #[derive(Default)]
@@ -46,6 +45,7 @@ fn version_from_manifest(data: &[u8]) -> Option<String> {
 }
 
 fn extract(apk: &Path, summary: &mut Summary) -> io::Result<()> {
+    let abi_prefix = format!("lib/{}/", abi::ANDROID);
     let mut archive = zip::ZipArchive::new(File::open(apk)?).map_err(io::Error::other)?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(io::Error::other)?;
@@ -65,7 +65,7 @@ fn extract(apk: &Path, summary: &mut Summary) -> io::Result<()> {
             }
             continue;
         }
-        let dest: PathBuf = if let Some(lib) = name.strip_prefix(ABI_PREFIX) {
+        let dest: PathBuf = if let Some(lib) = name.strip_prefix(&abi_prefix) {
             if lib.contains('/') {
                 continue;
             }
@@ -123,9 +123,11 @@ pub fn install(apks: &[PathBuf]) -> io::Result<Summary> {
         extract(apk, &mut summary)?;
     }
     if !paths::lib_dir().join("libroblox.so").exists() {
-        return Err(io::Error::other(
-            "no lib/x86_64/libroblox.so in the given APKs (is this the x86_64 split?)",
-        ));
+        return Err(io::Error::other(format!(
+            "no lib/{abi}/libroblox.so in the given APKs (is this the {split} split?)",
+            abi = abi::ANDROID,
+            split = abi::split_apk(),
+        )));
     }
     match &summary.version {
         Some(v) => fs::write(app.join("version"), v)?,

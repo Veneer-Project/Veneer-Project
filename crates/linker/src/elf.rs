@@ -115,11 +115,35 @@ pub const STT_OBJECT: u8 = 1;
 pub const STT_FUNC: u8 = 2;
 pub const STT_TLS: u8 = 6;
 
-pub const R_X86_64_64: u32 = 1;
-pub const R_X86_64_GLOB_DAT: u32 = 6;
-pub const R_X86_64_JUMP_SLOT: u32 = 7;
-pub const R_X86_64_RELATIVE: u32 = 8;
-pub const R_X86_64_DTPMOD64: u32 = 16;
-pub const R_X86_64_DTPOFF64: u32 = 17;
-pub const R_X86_64_TPOFF64: u32 = 18;
-pub const R_X86_64_IRELATIVE: u32 = 37;
+pub const EM_AARCH64: u16 = 183;
+
+/// The machine and relocation numbers of the architecture Veneer runs on.
+/// The guest library must be built for the same one: there is no emulation.
+#[cfg(target_arch = "x86_64")]
+pub mod arch {
+    pub const MACHINE: u16 = super::EM_X86_64;
+    pub const NAME: &str = "x86-64";
+    pub const R_ABS64: u32 = 1; // R_X86_64_64
+    pub const R_GLOB_DAT: u32 = 6;
+    pub const R_JUMP_SLOT: u32 = 7;
+    pub const R_RELATIVE: u32 = 8;
+    pub const R_IRELATIVE: u32 = 37;
+    /// DTPMOD64, DTPOFF64, TPOFF64.
+    pub const R_TLS: &[u32] = &[16, 17, 18];
+}
+
+#[cfg(target_arch = "aarch64")]
+pub mod arch {
+    pub const MACHINE: u16 = super::EM_AARCH64;
+    pub const NAME: &str = "AArch64";
+    pub const R_ABS64: u32 = 257;
+    pub const R_GLOB_DAT: u32 = 1025;
+    pub const R_JUMP_SLOT: u32 = 1026;
+    pub const R_RELATIVE: u32 = 1027;
+    pub const R_IRELATIVE: u32 = 1032;
+    /// TLS_DTPMOD64, TLS_DTPREL64, TLS_TPREL64, TLSDESC.
+    pub const R_TLS: &[u32] = &[1028, 1029, 1030, 1031];
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+compile_error!("Veneer supports x86-64 and AArch64 hosts only");

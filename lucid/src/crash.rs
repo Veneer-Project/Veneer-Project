@@ -2,20 +2,29 @@
 
 use std::ffi::c_void;
 
+/// Program counter, stack pointer and frame pointer at the fault.
+#[cfg(target_arch = "x86_64")]
+unsafe fn registers(uc: *const libc::ucontext_t) -> (usize, usize, usize) {
+    let g = unsafe { &(*uc).uc_mcontext.gregs };
+    (
+        g[libc::REG_RIP as usize] as usize,
+        g[libc::REG_RSP as usize] as usize,
+        g[libc::REG_RBP as usize] as usize,
+    )
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn registers(uc: *const libc::ucontext_t) -> (usize, usize, usize) {
+    let m = unsafe { &(*uc).uc_mcontext };
+    (m.pc as usize, m.sp as usize, m.regs[29] as usize)
+}
+
 unsafe extern "C" fn on_fatal(sig: i32, info: *mut libc::siginfo_t, ctx: *mut c_void) {
-    let uc = ctx as *mut libc::ucontext_t;
-    let (rip, rsp, rbp) = unsafe {
-        let g = &(*uc).uc_mcontext.gregs;
-        (
-            g[libc::REG_RIP as usize] as usize,
-            g[libc::REG_RSP as usize] as usize,
-            g[libc::REG_RBP as usize] as usize,
-        )
-    };
+    let (pc, sp, fp) = unsafe { registers(ctx as *const libc::ucontext_t) };
     let addr = unsafe { (*info).si_addr() } as usize;
     eprintln!("\nveneer: fatal signal {sig} (fault address {addr:#x})");
-    eprintln!("  rip {}", lucid_linker::describe_addr(rip));
-    eprintln!("  rsp {rsp:#x} rbp {rbp:#x}");
+    eprintln!("  pc {}", lucid_linker::describe_addr(pc));
+    eprintln!("  sp {sp:#x} fp {fp:#x}");
     if let Ok(maps) = std::fs::read_to_string("/proc/self/maps") {
         for l in maps.lines() {
             let mut it = l.split(['-', ' ']);
@@ -32,13 +41,17 @@ unsafe extern "C" fn on_fatal(sig: i32, info: *mut libc::siginfo_t, ctx: *mut c_
     let mut shown = 0;
     let mut last = 0usize;
     let mut repeats = 0usize;
+    let page = match unsafe { libc::sysconf(libc::_SC_PAGESIZE) } {
+        n if n > 0 => n as usize,
+        _ => 4096,
+    };
     for i in 0..4096usize {
-        let p = (rsp + i * 8) as *const usize;
+        let p = (sp + i * 8) as *const usize;
         // Stay within the page range we know is mapped: stop at a page
         // boundary we cannot verify.
         let mut vec = 0u8;
-        if (p as usize) % 4096 == 0
-            && unsafe { libc::mincore((p as usize) as *mut c_void, 4096, &mut vec) } != 0
+        if (p as usize) % page == 0
+            && unsafe { libc::mincore((p as usize) as *mut c_void, page, &mut vec) } != 0
         {
             break;
         }

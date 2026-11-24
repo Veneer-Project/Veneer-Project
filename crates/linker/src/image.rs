@@ -10,13 +10,22 @@ use std::path::Path;
 use crate::elf::*;
 use crate::{resolve_global, stubs};
 
-const PAGE: usize = 4096;
+/// The kernel's page size: 4 KiB on x86-64, but 16 KiB or 64 KiB on some
+/// AArch64 kernels (Apple Silicon under Asahi Linux uses 16 KiB).
+fn page_size() -> usize {
+    static PAGE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *PAGE.get_or_init(|| match unsafe { libc::sysconf(libc::_SC_PAGESIZE) } {
+        n if n > 0 => n as usize,
+        _ => 4096,
+    })
+}
 
 fn page_floor(x: usize) -> usize {
-    x & !(PAGE - 1)
+    x & !(page_size() - 1)
 }
 fn page_ceil(x: usize) -> usize {
-    (x + PAGE - 1) & !(PAGE - 1)
+    let page = page_size();
+    (x + page - 1) & !(page - 1)
 }
 
 #[derive(Debug)]
@@ -411,13 +420,50 @@ pub(crate) fn load(path: &Path) -> Result<Image, LoadError> {
     result
 }
 
+/// Run an IFUNC resolver the way bionic does.
+#[cfg(target_arch = "x86_64")]
+unsafe fn call_ifunc_resolver(resolver: usize) -> usize {
+    let f: extern "C" fn() -> usize = unsafe { std::mem::transmute(resolver) };
+    f()
+}
+
+/// On AArch64 bionic passes `(AT_HWCAP | _IFUNC_ARG_HWCAP, &__ifunc_arg_t)`
+/// so resolvers can pick CPU-specific code.
+#[cfg(target_arch = "aarch64")]
+unsafe fn call_ifunc_resolver(resolver: usize) -> usize {
+    #[repr(C)]
+    struct IfuncArg {
+        size: usize,
+        hwcap: u64,
+        hwcap2: u64,
+    }
+    const IFUNC_ARG_HWCAP: u64 = 1 << 62;
+    let hwcap = unsafe { libc::getauxval(libc::AT_HWCAP) };
+    let arg = IfuncArg {
+        size: size_of::<IfuncArg>(),
+        hwcap,
+        hwcap2: unsafe { libc::getauxval(libc::AT_HWCAP2) },
+    };
+    let f: extern "C" fn(u64, *const IfuncArg) -> usize = unsafe { std::mem::transmute(resolver) };
+    f(hwcap | IFUNC_ARG_HWCAP, &arg)
+}
+
 fn load_inner(path: &Path, file: &File, view: usize, len: usize) -> Result<Image, LoadError> {
     let eh = unsafe { &*(view as *const Ehdr) };
     if &eh.e_ident[..4] != b"\x7fELF" || eh.e_ident[4] != 2 || eh.e_ident[5] != 1 {
         return Err(LoadError::Format("not a little-endian ELF64 file"));
     }
-    if eh.e_machine != EM_X86_64 || eh.e_type != ET_DYN {
-        return Err(LoadError::Format("not an x86-64 shared object"));
+    if eh.e_type != ET_DYN {
+        return Err(LoadError::Format("not a shared object"));
+    }
+    if eh.e_machine != arch::MACHINE {
+        log::error!(
+            "{}: built for ELF machine {}, but this is an {} system",
+            path.display(),
+            eh.e_machine,
+            arch::NAME
+        );
+        return Err(LoadError::Format("shared object is for a different CPU architecture"));
     }
     let phoff = eh.e_phoff as usize;
     let phnum = eh.e_phnum as usize;
@@ -439,6 +485,23 @@ fn load_inner(path: &Path, file: &File, view: usize, len: usize) -> Result<Image
         .any(|p| p.p_type == PT_LOAD && p.p_flags & PF_W != 0 && p.p_flags & PF_X != 0)
     {
         return Err(LoadError::Format("segment is both writable and executable"));
+    }
+
+    // Segments can only be mapped at page granularity. A library aligned
+    // for 4 KiB pages cannot be loaded on a kernel with larger pages (like
+    // Asahi Linux's 16 KiB) without copying; Android 15+ apps are built
+    // 16 KiB-aligned, so this is reported instead of worked around.
+    if let Some(ph) = phdrs
+        .iter()
+        .find(|p| p.p_type == PT_LOAD && (p.p_align as usize) < page_size())
+    {
+        log::error!(
+            "{}: segments are aligned to {} bytes, but this kernel uses {}-byte pages",
+            path.display(),
+            ph.p_align,
+            page_size()
+        );
+        return Err(LoadError::Format("segments are aligned for a smaller page size than this kernel's"));
     }
 
     let mapped = map_segments(file, &phdrs)?;
@@ -573,19 +636,25 @@ fn load_inner(path: &Path, file: &File, view: usize, len: usize) -> Result<Image
         let ty = (r.r_info & 0xffff_ffff) as u32;
         let sym = (r.r_info >> 32) as u32;
         let target = (bias + r.r_offset as usize) as *mut usize;
+        // GLOB_DAT and JUMP_SLOT take the addend too: it is always 0 on
+        // x86-64, and AArch64 defines them as S + A.
         let value = match ty {
-            R_X86_64_RELATIVE => bias.wrapping_add(r.r_addend as usize),
-            R_X86_64_64 => sym_addr(sym).wrapping_add(r.r_addend as usize),
-            R_X86_64_GLOB_DAT | R_X86_64_JUMP_SLOT => sym_addr(sym),
-            R_X86_64_IRELATIVE => {
+            arch::R_RELATIVE => bias.wrapping_add(r.r_addend as usize),
+            arch::R_ABS64 | arch::R_GLOB_DAT | arch::R_JUMP_SLOT => {
+                sym_addr(sym).wrapping_add(r.r_addend as usize)
+            }
+            arch::R_IRELATIVE => {
                 ifuncs.push((target as usize, bias.wrapping_add(r.r_addend as usize)));
                 return Ok(());
             }
-            R_X86_64_DTPMOD64 | R_X86_64_DTPOFF64 | R_X86_64_TPOFF64 => {
+            t if arch::R_TLS.contains(&t) => {
                 return Err(LoadError::Format("TLS relocation in image without PT_TLS"));
             }
             0 => return Ok(()),
-            _ => return Err(LoadError::Format("unsupported relocation type")),
+            t => {
+                log::error!("{}: unsupported relocation type {t}", path.display());
+                return Err(LoadError::Format("unsupported relocation type"));
+            }
         };
         unsafe { target.write_unaligned(value) };
         Ok(())
@@ -634,8 +703,7 @@ fn load_inner(path: &Path, file: &File, view: usize, len: usize) -> Result<Image
         }
     }
     for (target, resolver) in ifuncs {
-        let f: extern "C" fn() -> usize = unsafe { std::mem::transmute(resolver) };
-        unsafe { (target as *mut usize).write_unaligned(f()) };
+        unsafe { (target as *mut usize).write_unaligned(call_ifunc_resolver(resolver)) };
     }
 
     // Make RELRO read-only, as the code may rely on (or probe) it.

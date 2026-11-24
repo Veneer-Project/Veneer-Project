@@ -1,7 +1,12 @@
 # Veneer
 
+> **This is the `experimental` branch.** What is here is implemented but
+> **not tested for bugs**. Releases from it are marked as pre-releases. For
+> the tested version, use the `main` branch and its releases. See
+> [Experimental: ARM64](#experimental-arm64) for what this branch adds.
+
 An open-source runtime, written in Rust, that runs the official **Android x86-64
-build of Roblox** on desktop Linux — the same idea as the closed-source
+(and, experimentally, arm64) build of Roblox** on desktop Linux — the same idea as the closed-source
 [Sober](https://sober.vinegarhq.org/), but open.
 
 No Android and no Java are involved. Veneer loads Roblox's native library
@@ -67,10 +72,50 @@ Not implemented:
 - Mouse selection inside text boxes, multi-line text boxes (drawn as one line)
 - Crash reporting (Crashpad is deliberately never started)
 
+## Experimental: ARM64
+
+Veneer can be built for 64-bit ARM Linux (AArch64), such as Snapdragon X
+laptops, Apple Silicon Macs running Asahi Linux, or a Raspberry Pi 5. It then
+runs Roblox's **arm64-v8a** Android libraries the same way it runs the x86-64
+ones on a PC: natively, without emulation.
+
+**Status: untested on real hardware.** Nobody has run it on an ARM64 machine
+yet. What was checked, under QEMU emulation on an x86-64 PC:
+
+- all unit tests pass (including new ones for `setjmp`/`longjmp` and the
+  pthread wrappers below);
+- `veneer update` gets the arm64 build from Google Play (Roblox 2.748.1527),
+  and its signature check passes;
+- `veneer probe` loads `libroblox.so` and the engine boots through the same
+  startup sequence as on x86-64, with the same unresolved imports.
+
+Never tried: the window, Vulkan rendering, input, audio, voice, logging in and
+joining games. Reports (working or not) are very welcome; please attach
+`~/.local/share/veneer/logs/latest.log`.
+
+What is different on ARM64:
+
+- The ELF loader handles AArch64 relocations, reads the kernel's page size
+  (16 KiB on Asahi Linux, 4 KiB elsewhere) and passes CPU features to ifunc
+  resolvers as Android does.
+- `setjmp`/`longjmp`, the unresolved-symbol thunks (with an instruction cache
+  flush) and the crash report are written for AArch64.
+- glibc's `pthread_mutex_t` and `pthread_attr_t` are 8 bytes larger than
+  Android's on AArch64; their initialisers are wrapped so they do not write
+  past the guest's objects.
+- Google Play is asked as a Pixel Tablet (`lucid/data/play_device_arm64.properties`),
+  so it serves `split_config.arm64_v8a.apk`. To install by hand:
+  `veneer install base.apk split_config.arm64_v8a.apk`.
+- `veneer install --from-sober` does not apply: Sober is x86-64 only.
+
+Known risks: if Roblox's arm64 library is aligned for 4 KiB pages, it cannot
+be loaded on a 16 KiB-page kernel (Veneer says so instead of crashing);
+Android 15 requires 16 KiB alignment, so current builds should be fine.
+
 ## Install
 
 Every [release](https://github.com/Veneer-Project/Veneer-Project/releases) has
-ready-made x86-64 builds: a `.deb` (Debian, Ubuntu), an `.rpm` (Fedora,
+ready-made x86-64 builds (and, in pre-releases from this branch, arm64 builds): a `.deb` (Debian, Ubuntu), an `.rpm` (Fedora,
 openSUSE), and the plain `veneer` binary (also as a `.tar.gz` with the
 launcher and icons). The packages install the app menu entry and icons, so
 `veneer desktop-entry` is not needed with them.
@@ -354,7 +399,8 @@ Debugging tools:
 1. **Google Play download** (`update.rs`) depends on a third-party token
    service (`auroraoss.com/api/auth`), on the `gpapi` crate, and on the device
    profile in `lucid/data/play_device.properties` (an x86-64 Chromebook; the
-   "Play Games on PC" x86-64 profile is not offered Roblox). If any of these
+   "Play Games on PC" x86-64 profile is not offered Roblox; on arm64,
+   `play_device_arm64.properties`, a Pixel Tablet). If any of these
    stop working, downloads break and only the manual install remains. Google
    rolls releases out per device class, so the version offered can lag the
    newest one by a release.

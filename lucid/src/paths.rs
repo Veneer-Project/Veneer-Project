@@ -61,7 +61,10 @@ pub fn cache_dir() -> PathBuf {
 
 /// Where an existing Sober (Flatpak) install keeps its downloaded APKs.
 pub fn sober_package_dir() -> PathBuf {
-    home().join(".var/app/org.vinegarhq.Sober/data/sober/packages/x86_64/com.roblox.client")
+    home()
+        .join(".var/app/org.vinegarhq.Sober/data/sober/packages")
+        .join(crate::abi::SPLIT)
+        .join("com.roblox.client")
 }
 
 /// `$XDG_CONFIG_HOME/veneer` (default `~/.config/veneer`): user configuration.

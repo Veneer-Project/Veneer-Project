@@ -1,6 +1,6 @@
 //! Keeping the game installed and current.
 //!
-//! Roblox's x86-64 Android build is only published on Google Play, which
+//! Roblox's x86-64 and arm64 Android builds are only published on Google Play, which
 //! needs a signed-in account. We use the public anonymous-account token
 //! service run by the Aurora Store project (the open-source Play client),
 //! then talk to Google Play directly and download from Google's CDN.
@@ -13,16 +13,14 @@ use std::time::Duration;
 
 use gpapi::Gpapi;
 
-use crate::{install, paths};
+use crate::{abi, install, paths};
 
 const PACKAGE: &str = "com.roblox.client";
 const DISPENSER: &str = "https://auroraoss.com/api/auth";
 /// The dispenser only answers clients identifying as Aurora Store.
 const DISPENSER_USER_AGENT: &str = "com.aurora.store-4.7.5-71";
-/// The Google Play device profile we present: an x86-64 Chromebook, so
-/// Play serves the x86-64 split. (The "Play Games on PC" x86-64 profile is
-/// not offered Roblox at all.)
-const DEVICE_PROPERTIES: &str = include_str!("../data/play_device.properties");
+/// The Google Play device profile we present (see [`abi::DEVICE_PROPERTIES`]).
+const DEVICE_PROPERTIES: &str = abi::DEVICE_PROPERTIES;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -217,16 +215,17 @@ pub fn download_and_install(release: &Release) -> Result<()> {
     let split = splits
         .into_iter()
         .find_map(|(name, url)| match (name, url) {
-            (Some(n), Some(u)) if n.contains("x86_64") => Some(u),
+            (Some(n), Some(u)) if n.contains(abi::SPLIT) => Some(u),
             _ => None,
         })
-        .ok_or_else(|| format!("Google Play offered no x86_64 build of Roblox (splits: {names:?})"))?;
+        .ok_or_else(|| format!("Google Play offered no {} build of Roblox (splits: {names:?})", abi::ANDROID))?;
 
     let dir = paths::cache_dir().join("download");
     fs::create_dir_all(&dir)?;
+    let split_name = abi::split_apk();
     let files: [(PathBuf, &str, &str); 2] = [
         (dir.join("base.apk"), base.as_str(), "base.apk"),
-        (dir.join("split_config.x86_64.apk"), split.as_str(), "split_config.x86_64.apk"),
+        (dir.join(&split_name), split.as_str(), split_name.as_str()),
     ];
     for (path, url, label) in &files {
         fetch(url, path, label)?;
@@ -296,7 +295,8 @@ pub fn ensure_current() -> Result<()> {
                 }
                 None => Err(format!(
                     "could not download Roblox: {e}\n\
-                     You can install it manually with `veneer install <base.apk> <split_config.x86_64.apk>`."
+                     You can install it manually with `veneer install <base.apk> <{}>`.",
+                    abi::split_apk()
                 )
                 .into()),
             };
@@ -318,7 +318,8 @@ pub fn ensure_current() -> Result<()> {
             download_and_install(&release).map_err(|e| {
                 format!(
                     "could not download Roblox: {e}\n\
-                     You can install it manually with `veneer install <base.apk> <split_config.x86_64.apk>`."
+                     You can install it manually with `veneer install <base.apk> <{}>`.",
+                    abi::split_apk()
                 )
                 .into()
             })

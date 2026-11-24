@@ -5,8 +5,71 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(target_arch = "x86_64")]
 const THUNK_SIZE: usize = 24;
+#[cfg(target_arch = "aarch64")]
+const THUNK_SIZE: usize = 32;
+/// A multiple of every page size in use (4, 16 and 64 KiB).
 const ARENA_SIZE: usize = 256 * 1024;
+
+/// Machine code that calls `handler(name)`: loads the two constants and
+/// jumps (tail call), so the handler's return value is the thunk's.
+#[cfg(target_arch = "x86_64")]
+fn thunk_code(name: u64, handler: u64) -> Vec<u8> {
+    let mut code = Vec::with_capacity(THUNK_SIZE);
+    code.extend_from_slice(&[0x48, 0xbf]); // mov rdi, imm64
+    code.extend_from_slice(&name.to_le_bytes());
+    code.extend_from_slice(&[0x48, 0xb8]); // mov rax, imm64
+    code.extend_from_slice(&handler.to_le_bytes());
+    code.extend_from_slice(&[0xff, 0xe0]); // jmp rax
+    code
+}
+
+#[cfg(target_arch = "aarch64")]
+fn thunk_code(name: u64, handler: u64) -> Vec<u8> {
+    let mut code = Vec::with_capacity(THUNK_SIZE);
+    for insn in [
+        0x5800_0080u32, // ldr x0, #16   (name)
+        0x5800_00b0,    // ldr x16, #20  (handler, at offset 24)
+        0xd61f_0200,    // br x16
+        0xd503_201f,    // nop (aligns the literals)
+    ] {
+        code.extend_from_slice(&insn.to_le_bytes());
+    }
+    code.extend_from_slice(&name.to_le_bytes());
+    code.extend_from_slice(&handler.to_le_bytes());
+    code
+}
+
+/// x86-64 keeps instruction and data caches coherent by itself.
+#[cfg(target_arch = "x86_64")]
+unsafe fn sync_icache(_write: usize, _exec: usize, _len: usize) {}
+
+/// AArch64 does not: clean the data cache lines (through the view that was
+/// written) to the point of unification, then invalidate the instruction
+/// cache lines of the view that runs. Linux lets user space do both.
+#[cfg(target_arch = "aarch64")]
+unsafe fn sync_icache(write: usize, exec: usize, len: usize) {
+    use std::arch::asm;
+    let ctr: u64;
+    unsafe { asm!("mrs {}, ctr_el0", out(reg) ctr, options(nomem, nostack)) };
+    let dline = 4usize << ((ctr >> 16) & 0xf);
+    let iline = 4usize << (ctr & 0xf);
+    unsafe {
+        let mut a = write & !(dline - 1);
+        while a < write + len {
+            asm!("dc cvau, {}", in(reg) a, options(nostack));
+            a += dline;
+        }
+        asm!("dsb ish", options(nostack));
+        let mut a = exec & !(iline - 1);
+        while a < exec + len {
+            asm!("ic ivau, {}", in(reg) a, options(nostack));
+            a += iline;
+        }
+        asm!("dsb ish", "isb", options(nostack));
+    }
+}
 
 /// Thunk memory, mapped twice so that no mapping is ever both writable
 /// and executable (W^X): thunks are written through `write` and run from
@@ -50,18 +113,14 @@ pub fn make(name: &str) -> usize {
 
     let cname = CString::new(name).unwrap().into_raw() as u64;
     let handler = unresolved_called as usize as u64;
-    let mut code = Vec::with_capacity(THUNK_SIZE);
-    code.extend_from_slice(&[0x48, 0xbf]); // mov rdi, imm64
-    code.extend_from_slice(&cname.to_le_bytes());
-    code.extend_from_slice(&[0x48, 0xb8]); // mov rax, imm64
-    code.extend_from_slice(&handler.to_le_bytes());
-    code.extend_from_slice(&[0xff, 0xe0]); // jmp rax
+    let code = thunk_code(cname, handler);
     let write = arena.write as *mut c_void;
     unsafe {
         if libc::mprotect(write, ARENA_SIZE, libc::PROT_READ | libc::PROT_WRITE) != 0 {
             panic!("cannot open stub arena: {}", std::io::Error::last_os_error());
         }
         std::ptr::copy_nonoverlapping(code.as_ptr(), (arena.write + offset) as *mut u8, code.len());
+        sync_icache(arena.write + offset, arena.exec + offset, code.len());
         libc::mprotect(write, ARENA_SIZE, libc::PROT_NONE);
     }
     arena.exec + offset

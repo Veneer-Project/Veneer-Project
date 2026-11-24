@@ -1,10 +1,16 @@
-# Builds Veneer when a GitHub release is published and attaches:
-#   veneer-<version>-x86_64-linux          the bare ELF binary
-#   veneer-<version>-x86_64-linux.tar.gz   binary + desktop file + icons + docs
-#   veneer_<version>_amd64.deb             Debian / Ubuntu
-#   veneer-<version>-1.x86_64.rpm          Fedora / openSUSE
+# Builds Veneer for x86-64 and AArch64 (arm64).
 #
-# The build runs on Debian 12 so the binary needs only glibc 2.36 and runs on
+# When a GitHub release is published, attaches to it, for each architecture:
+#   veneer-<version>-<arch>-linux          the bare ELF binary
+#   veneer-<version>-<arch>-linux.tar.gz   binary + desktop file + icons + docs
+#   veneer_<version>_<amd64|arm64>.deb     Debian / Ubuntu
+#   veneer-<version>-1.<arch>.rpm          Fedora / openSUSE
+# plus SHA256SUMS for all of them.
+#
+# A push to the `experimental` branch builds the same files without
+# publishing anything; they are kept as the run's artifacts for testing.
+#
+# The builds run on Debian 12 so the binaries need only glibc 2.36 and run on
 # most current distributions. To rebuild the files of an existing release,
 # run the workflow by hand ("Run workflow") and give the release tag.
 
@@ -13,6 +19,8 @@ name: Release
 on:
   release:
     types: [published]
+  push:
+    branches: [experimental]
   workflow_dispatch:
     inputs:
       tag:
@@ -22,12 +30,21 @@ on:
 permissions:
   contents: write
 
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     container: debian:12
-    env:
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
       - name: Install build tools
         run: |
@@ -37,23 +54,32 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ env.TAG || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.arch }}
 
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deb,cargo-generate-rpm
 
-      - name: Version from tag
+      - name: Version
         id: version
         run: |
-          # v1.2.3 -> 1.2.3; 1.2.3-beta.1 -> 1.2.3~beta.1 (sorts before 1.2.3 in dpkg and rpm)
-          version="${TAG#v}"
-          version="$(printf '%s' "$version" | tr '-' '~')"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ -n "$TAG" ]; then
+            name="${TAG#v}"
+          else
+            # Branch build: the crate version plus the commit.
+            git config --global --add safe.directory "$GITHUB_WORKSPACE"
+            crate="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+            name="$crate-git.$(git rev-parse --short HEAD)"
+          fi
+          # 1.2.3-beta.1 -> 1.2.3~beta.1 (sorts before 1.2.3 in dpkg and rpm)
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "package=$(printf '%s' "$name" | tr '-' '~')" >> "$GITHUB_OUTPUT"
 
       - name: Build
         run: cargo build --release --locked -p lucid
@@ -63,10 +89,12 @@ jobs:
 
       - name: Package
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          NAME: ${{ steps.version.outputs.name }}
+          VERSION: ${{ steps.version.outputs.package }}
+          ARCH: ${{ matrix.arch }}
         run: |
           mkdir -p dist
-          name="veneer-${TAG#v}-x86_64-linux"
+          name="veneer-$NAME-$ARCH-linux"
 
           cp target/release/veneer "dist/$name"
 
@@ -79,24 +107,27 @@ jobs:
           cargo deb -p lucid --no-build --no-strip --deb-version "$VERSION" -o dist/
           cargo generate-rpm -p lucid -s "version = \"$VERSION\"" -o dist/
 
-          cd dist && sha256sum * > SHA256SUMS && ls -la
+          ls -la dist
 
       - uses: actions/upload-artifact@v4
         with:
-          name: veneer-${{ steps.version.outputs.version }}
+          name: veneer-${{ steps.version.outputs.name }}-${{ matrix.arch }}
           path: dist/*
 
   upload:
     needs: build
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     env:
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
 
       - name: Attach to the release
         run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
