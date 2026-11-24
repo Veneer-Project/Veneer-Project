@@ -107,6 +107,13 @@ jobs:
           cargo deb -p lucid --no-build --no-strip --deb-version "$VERSION" -o dist/
           cargo generate-rpm -p lucid -s "version = \"$VERSION\"" -o dist/
 
+          # The packages' version keeps its "~" (so 1.2.3~beta.1 sorts before
+          # 1.2.3), but GitHub turns "~" into "." in uploaded file names, which
+          # would no longer match SHA256SUMS: name the files with "-" instead.
+          for f in dist/*'~'*; do
+            [ -e "$f" ] && mv "$f" "$(printf '%s' "$f" | tr '~' '-')"
+          done
+
           ls -la dist
 
       - uses: actions/upload-artifact@v4
