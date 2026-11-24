@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/linker", "crates/discord", "crates/bionic", "crates/jni", "crates/android", "lucid"]
 
 [workspace.package]
-version = "1.0.1"
+version = "1.1.0-exp.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
