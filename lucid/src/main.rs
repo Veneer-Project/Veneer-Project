@@ -193,6 +193,35 @@ fn protect_process() {
     }
 }
 
+/// The kernel's `uname` version string; under FreeBSD's Linux compatibility
+/// layer (the "Linuxulator") it is FreeBSD's own, e.g. "FreeBSD 14.2-RELEASE ...",
+/// while the release field claims a Linux version.
+fn kernel_version() -> String {
+    let mut u: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&mut u) } != 0 {
+        return String::new();
+    }
+    unsafe { std::ffi::CStr::from_ptr(u.version.as_ptr()) }.to_string_lossy().into_owned()
+}
+
+/// Report the host, and on FreeBSD check what the Linux compatibility layer
+/// must provide: the guest's libc (glibc) and the crash report need
+/// `/proc/self/maps`, which only exists when linprocfs is mounted.
+fn check_host() {
+    let version = kernel_version();
+    if !version.starts_with("FreeBSD") {
+        return;
+    }
+    log::info!("running on {} through its Linux compatibility layer (experimental)", version.trim());
+    if !std::path::Path::new("/proc/self/maps").exists() {
+        log::warn!(
+            "/proc is not mounted in the Linux compatibility layer; as root run \
+             `sysrc linux_mounts_enable=YES && service linux restart` \
+             (see packaging/freebsd/setup.sh)"
+        );
+    }
+}
+
 fn main() -> ExitCode {
     protect_process();
     // The embedded browser runs as a child process of ourselves.
@@ -203,6 +232,7 @@ fn main() -> ExitCode {
     paths::migrate();
     init_logging();
     crash::install();
+    check_host();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("install") => cmd_install(&args[1..]),

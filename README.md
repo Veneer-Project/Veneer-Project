@@ -3,7 +3,8 @@
 > **This is the `experimental` branch.** What is here is implemented but
 > **not tested for bugs**. Releases from it are marked as pre-releases. For
 > the tested version, use the `main` branch and its releases. See
-> [Experimental: ARM64](#experimental-arm64) for what this branch adds.
+> [Experimental: ARM64](#experimental-arm64) and
+> [Experimental: FreeBSD](#experimental-freebsd) for what this branch adds.
 
 An open-source runtime, written in Rust, that runs the official **Android x86-64
 (and, experimentally, arm64) build of Roblox** on desktop Linux — the same idea as the closed-source
@@ -111,6 +112,41 @@ What is different on ARM64:
 Known risks: if Roblox's arm64 library is aligned for 4 KiB pages, it cannot
 be loaded on a 16 KiB-page kernel (Veneer says so instead of crashing);
 Android 15 requires 16 KiB alignment, so current builds should be fine.
+
+## Experimental: FreeBSD
+
+Veneer runs on FreeBSD 13 or newer (amd64) through FreeBSD's **Linux
+compatibility layer** (the "Linuxulator"), the same way Steam and other Linux
+programs run there: you use the normal x86-64 Linux build, and FreeBSD
+translates its system calls. There is no separate FreeBSD build.
+
+**Status: untested.** Nobody has run it on FreeBSD yet.
+
+Setup, once:
+
+1. Install the GPU driver (`graphics/drm-kmod`; add `i915kms` or `amdgpu` to
+   `kld_list` in `/etc/rc.conf`), add your user to the `video` group, and use a
+   Wayland desktop and PulseAudio (or PipeWire).
+2. As root, run [`packaging/freebsd/setup.sh`](packaging/freebsd/setup.sh)
+   (it is also in the x86-64 `.tar.gz` as `freebsd-setup.sh`). It enables the
+   Linux compatibility layer with `/proc`, `/sys` and `/dev` mounted, installs
+   the Rocky Linux 9 userland (`linux_base-rl9`) and the Linux libraries Veneer
+   loads (`linux-rl9-libglvnd`, `-dri`, `-vulkan`, `-wayland`,
+   `-pulseaudio-libs`; optionally `-gtk3`, `-webkit2gtk3`, `-libsecret`), then
+   checks the GPU device and says what is still missing.
+3. As your normal user, run `./veneer-<version>-x86_64-linux run`.
+
+Veneer notices FreeBSD and writes it in its log
+(`~/.local/share/veneer/logs/latest.log`), with a warning if `/proc` is not
+mounted. The `.deb`/`.rpm` packages do not apply; `veneer desktop-entry` adds
+the app menu entry.
+
+Why not a native FreeBSD build: Veneer works because Android's libc and Linux's
+glibc share the Linux kernel's structure layouts, so most of the game's libc
+calls go straight to glibc. FreeBSD's libc differs in `stat`, `errno` values,
+flags, signals and pthread types, and has no futex, so a native port would
+need almost every call translated. The compatibility layer does that in the
+kernel already.
 
 ## Install
 

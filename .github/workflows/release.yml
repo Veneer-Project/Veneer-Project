@@ -102,6 +102,10 @@ jobs:
           cp target/release/veneer packaging/veneer.desktop README.md LICENSE "stage/$name/"
           cp -r assets/icons "stage/$name/icons"
           cp assets/logo.svg "stage/$name/icons/veneer.svg"
+          # FreeBSD runs the x86-64 Linux build (see README, "Experimental: FreeBSD").
+          if [ "$ARCH" = x86_64 ]; then
+            cp packaging/freebsd/setup.sh "stage/$name/freebsd-setup.sh"
+          fi
           tar -C stage -czf "dist/$name.tar.gz" "$name"
 
           cargo deb -p lucid --no-build --no-strip --deb-version "$VERSION" -o dist/
